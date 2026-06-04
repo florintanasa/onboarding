@@ -73,7 +73,7 @@ def gen_entity_mechanic(n, fi):
 
     # 3. Asamblam structura completa a clasei Java conform Jmix Studio
     clasa_completa = (
-        'package "' + COMPANY + '"."' + project_name + '".entity";\n\n'
+        f"package {COMPANY}.{project_name}.entity;\n\n"
         "import io.jmix.core.entity.annotation.JmixGeneratedValue;\n"
         "import io.jmix.core.metamodel.annotation.InstanceName;\n"
         "import io.jmix.core.metamodel.annotation.JmixEntity;\n"
@@ -164,13 +164,13 @@ def gen_list_ui(n, fi):
         '      focusComponent="' + n.lower() + 'sDataGrid">\n'
         "    <data>\n"
         '        <collection id="' + n.lower() + 'sDc"\n'
-        "                    class="
+        '                    class="'
         + COMPANY
         + "."
         + project_name
         + ".entity."
         + n
-        + ">\n"
+        + '">\n'
         '            <loader id="' + n.lower() + 'sDl" readOnly="true">\n'
         "                <query>\n"
         "                    <![CDATA[select e from " + n + " e]]>\n"
@@ -335,13 +335,13 @@ def gen_detail_ui(n, fi):
         '      title="msg://' + n.lower() + 'DetailView.title">\n'
         "    <data>\n"
         '        <instance id="' + n.lower() + 'Dc"\n'
-        "                    class="
+        '                    class="'
         + COMPANY
         + "."
         + project_name
         + ".entity."
         + n
-        + ">\n"
+        + '">\n'
         '            <fetchPlan extends="_base"/>\n'
         '            <loader id="' + n.lower() + 'Dl"/>\n'
         "        </instance>\n"
