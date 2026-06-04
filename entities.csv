@@ -1,0 +1,13 @@
+ntity_name,field_name,field_type,mandatory,unique
+Department,name,String,true,false
+Step,name,String,true,true
+Step,duration,Integer,true,false
+User,username,String,true,true
+User,password,String,true,false
+User,firstName,String,false,false
+User,lastName,String,false,false
+User,email,String,true,true
+User,onboardingStatus,String,false,false
+UserStep,dueDate,LocalDate,true,false
+UserStep,completedDate,LocalDate,false,false
+UserStep,sortOrder,Integer,false,false
