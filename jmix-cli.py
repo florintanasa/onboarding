@@ -500,19 +500,7 @@ def update_menu(n):
         return
 
     # Generam linia exacta de meniu in formatul Jmix Studio
-    menu_item = (
-        '    <item view="'
-        + n
-        + '.list" title="msg://"'
-        + COMPANY
-        + '"."'
-        + project_name
-        + '".view.'
-        + n.lower()
-        + "/"
-        + n.lower()
-        + 'ListView.title"/>\n'
-    )
+    menu_item = f'    <item view="{n}.list" title="msg://{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title"/>\n'
 
     with open(menu_path, "r", encoding="utf-8") as f:
         content = f.read()
