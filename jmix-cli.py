@@ -80,6 +80,7 @@ def gen_entity_mechanic(n, fi):
         "import jakarta.persistence.*;\n"
         "import java.math.BigDecimal;\n"
         "import java.time.LocalDate;\n"
+        "import java.time.LocalDateTime;\n"
         "import java.time.OffsetDateTime;\n"
         "import java.util.UUID;\n"
         "import org.springframework.data.annotation.CreatedBy;\n"
