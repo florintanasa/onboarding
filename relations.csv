@@ -1,4 +1,7 @@
 source_entity,relation_type,target_entity,field_name,mandatory
-User,N:1,Department,department,false
+User_,N:1,Department,department,false
 UserStep,N:1,Step,step,true
-User,1:N,UserStep,steps,false
+UserStep,N:1,User_,user,true
+User_,1:N,UserStep,steps,false
+User_,1:1,UserConfig,config,false
+User_,N:N,Role,roles,false
