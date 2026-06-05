@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 import sys
@@ -31,111 +32,533 @@ COMPANY = get_company_name() or ""
 company_path = COMPANY.replace(".", "/")
 
 
-def get_fields(fi):
-    return [f.split(":", 1) if ":" in f else (f, "String") for f in fi.split()]
+def get_traits_from_csv(csv_path, target_entity_name):
+    """Citește traits.csv și returnează trăsăturile globale ale entității."""
+    traits = {
+        "versioned": True,
+        "audit_of_creation": True,
+        "audit_of_modification": True,
+        "soft_delete": False,
+    }
+    if not os.path.exists(csv_path):
+        return traits
+
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["entity_name"].strip().lower() == target_entity_name.lower():
+                traits["versioned"] = row["versioned"].strip().lower() == "true"
+                traits["audit_of_creation"] = (
+                    row["audit_of_creation"].strip().lower() == "true"
+                )
+                traits["audit_of_modification"] = (
+                    row["audit_of_modification"].strip().lower() == "true"
+                )
+                traits["soft_delete"] = row["soft_delete"].strip().lower() == "true"
+                break
+    return traits
 
 
-def gen_entity_mechanic(n, fi):
-    print("Generating Entity " + n + " mechanically (Zero AI, 100% Reliable)...")
+def get_entities_from_csv(csv_path, target_entity_name):
+    """Citește entities.csv și extrage doar câmpurile de business ale entității."""
+    fields_list = []
+    if not os.path.exists(csv_path):
+        print(f" ! Error: Fișierul CSV nu a fost găsit la: {csv_path}")
+        return fields_list
 
-    fields_list = get_fields(fi)
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["entity_name"].strip().lower() == target_entity_name.lower():
+                fields_list.append(
+                    {
+                        "name": row["field_name"].strip(),
+                        "type": row["field_type"].strip(),
+                        "mandatory": row["mandatory"].strip().lower() == "true",
+                        "unique": row["unique"].strip().lower() == "true",
+                    }
+                )
+    return fields_list
 
-    # 1. Construim sectiunea de declarare a campurilor specifice
-    java_fields = ""
-    is_first_text_field = True
 
-    for f_name, f_type in fields_list:
-        annotations = ""
-        # Punem @InstanceName pe primul camp de tip String
-        if f_type == "String" and is_first_text_field:
-            annotations += "    @InstanceName\n"
-            is_first_text_field = False
+def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
+    table_name = name.upper()
 
-        annotations += '    @Column(name = "' + f_name.upper() + '")\n'
-        java_fields += annotations + "    private " + f_type + " " + f_name + ";\n\n"
+    # Generăm indecșii unici conform standardului Jmix @Table(indexes=...)
+    unique_indexes = []
+    for field in fields_list:
+        if field["unique"]:
+            col_name = field["name"].upper()
+            unique_indexes.append(
+                f'@Index(name = "IDX_{table_name}_UNQ_{col_name}", columnList = "{col_name}", unique = true)'
+            )
 
-    # 2. Construim sectiunea de Getter-e si Setter-e pentru campurile specifice
-    java_methods = ""
-    for f_name, f_type in fields_list:
-        cap_name = f_name[0].upper() + f_name[1:]
-
-        # Getter
-        java_methods += "    public " + f_type + " get" + cap_name + "() {\n"
-        java_methods += "        return " + f_name + ";\n"
-        java_methods += "    }\n\n"
-
-        # Setter
-        java_methods += (
-            "    public void set" + cap_name + "(" + f_type + " " + f_name + ") {\n"
+    if unique_indexes:
+        indexes_str = ",\n        ".join(unique_indexes)
+        table_annotation = (
+            f'@Table(name = "{table_name}", indexes = {{\n        {indexes_str}\n}})'
         )
-        java_methods += "        this." + f_name + " = " + f_name + ";\n"
-        java_methods += "    }\n\n"
+    else:
+        table_annotation = f'@Table(name = "{table_name}")'
 
-    # 3. Asamblam structura completa a clasei Java conform Jmix Studio
-    clasa_completa = (
-        f"package {COMPANY}.{project_name}.entity;\n\n"
-        "import io.jmix.core.entity.annotation.JmixGeneratedValue;\n"
-        "import io.jmix.core.metamodel.annotation.InstanceName;\n"
-        "import io.jmix.core.metamodel.annotation.JmixEntity;\n"
-        "import jakarta.persistence.*;\n"
-        "import java.math.BigDecimal;\n"
-        "import java.time.LocalDate;\n"
-        "import java.time.LocalDateTime;\n"
-        "import java.time.OffsetDateTime;\n"
-        "import java.util.UUID;\n"
-        "import org.springframework.data.annotation.CreatedBy;\n"
-        "import org.springframework.data.annotation.CreatedDate;\n"
-        "import org.springframework.data.annotation.LastModifiedBy;\n"
-        "import org.springframework.data.annotation.LastModifiedDate;\n\n"
-        "@JmixEntity\n"
-        '@Table(name = "' + n.upper() + '")\n'
-        "@Entity\n"
-        "public class " + n + " {\n\n"
-        "    @Id\n"
-        '    @Column(name = "ID", nullable = false)\n'
-        "    @JmixGeneratedValue\n"
-        "    private UUID id;\n\n"
-        '    @Column(name = "VERSION", nullable = false)\n'
-        "    @Version\n"
-        "    private Integer version;\n\n"
-        "    @CreatedBy\n"
-        '    @Column(name = "CREATED_BY")\n'
-        "    private String createdBy;\n\n"
-        "    @CreatedDate\n"
-        '    @Column(name = "CREATED_DATE")\n'
-        "    private OffsetDateTime createdDate;\n\n"
-        "    @LastModifiedBy\n"
-        '    @Column(name = "LAST_MODIFIED_BY")\n'
-        "    private String lastModifiedBy;\n\n"
-        "    @LastModifiedDate\n"
-        '    @Column(name = "LAST_MODIFIED_DATE")\n'
-        "    private OffsetDateTime lastModifiedDate;\n\n"
-        "    // --- Specific Fields ---\n"
-        + java_fields
-        + "    // --- System Getters and Setters ---\n"
-        "    public UUID getId() {\n        return id;\n    }\n\n"
-        "    public void setId(UUID id) {\n        this.id = id;\n    }\n\n"
-        "    public Integer getVersion() {\n        return version;\n    }\n\n"
-        "    public void setVersion(Integer version) {\n        this.version = version;\n    }\n\n"
-        "    public String getCreatedBy() {\n        return createdBy;\n    }\n\n"
-        "    public void setCreatedBy(String createdBy) {\n        this.createdBy = createdBy;\n    }\n\n"
-        "    public OffsetDateTime getCreatedDate() {\n        return createdDate;\n    }\n\n"
-        "    public void setCreatedDate(OffsetDateTime createdDate) {\n        this.createdDate = createdDate;\n    }\n\n"
-        "    public String getLastModifiedBy() {\n        return lastModifiedBy;\n    }\n\n"
-        "    public void setLastModifiedBy(String lastModifiedBy) {\n        this.lastModifiedBy = lastModifiedBy;\n    }\n\n"
-        "    public OffsetDateTime getLastModifiedDate() {\n        return lastModifiedDate;\n    }\n\n"
-        "    public void setLastModifiedDate(OffsetDateTime lastModifiedDate) {\n        this.lastModifiedDate = lastModifiedDate;\n    }\n\n"
-        "    // --- Specific Getters and Setters ---\n" + java_methods + "}\n"
-    )
+    # Generăm proprietățile, metodele și importurile de trăsături în Java
+    java_traits_fields = ""
+    java_traits_methods = ""
+    dinamic_imports = set()
 
-    # 4. Scriem fisierul direct in structura corecta a proiectului
+    if traits["versioned"]:
+        java_traits_fields += '    @Column(name = "VERSION", nullable = false)\n    @Version\n    private Integer version;\n\n'
+        java_traits_methods += "    public Integer getVersion() {\n        return version;\n    }\n\n    public void setVersion(Integer version) {\n        this.version = version;\n    }\n\n"
+
+    if traits["audit_of_creation"]:
+        java_traits_fields += '    @CreatedBy\n    @Column(name = "CREATED_BY")\n    private String createdBy;\n\n    @CreatedDate\n    @Column(name = "CREATED_DATE")\n    private OffsetDateTime createdDate;\n\n'
+        java_traits_methods += "    public String getCreatedBy() {\n        return createdBy;\n    }\n\n    public void setCreatedBy(String createdBy) {\n        this.createdBy = createdBy;\n    }\n\n"
+        java_traits_methods += "    public OffsetDateTime getCreatedDate() {\n        return createdDate;\n    }\n\n    public void setCreatedDate(OffsetDateTime createdDate) {\n        this.createdDate = createdDate;\n    }\n\n"
+        dinamic_imports.add("import org.springframework.data.annotation.CreatedBy;")
+        dinamic_imports.add("import org.springframework.data.annotation.CreatedDate;")
+        dinamic_imports.add("import java.time.OffsetDateTime;")
+
+    if traits["audit_of_modification"]:
+        java_traits_fields += '    @LastModifiedBy\n    @Column(name = "LAST_MODIFIED_BY")\n    private String lastModifiedBy;\n\n    @LastModifiedDate\n    @Column(name = "LAST_MODIFIED_DATE")\n    private OffsetDateTime lastModifiedDate;\n\n'
+        java_traits_methods += "    public String getLastModifiedBy() {\n        return lastModifiedBy;\n    }\n\n    public void setLastModifiedBy(String lastModifiedBy) {\n        this.lastModifiedBy = lastModifiedBy;\n    }\n\n"
+        java_traits_methods += "    public OffsetDateTime getLastModifiedDate() {\n        return lastModifiedDate;\n    }\n\n    public void setLastModifiedDate(OffsetDateTime lastModifiedDate) {\n        this.lastModifiedDate = lastModifiedDate;\n    }\n\n"
+        dinamic_imports.add(
+            "import org.springframework.data.annotation.LastModifiedBy;"
+        )
+        dinamic_imports.add(
+            "import org.springframework.data.annotation.LastModifiedDate;"
+        )
+        dinamic_imports.add("import java.time.OffsetDateTime;")
+
+    if traits["soft_delete"]:
+        java_traits_fields += '    @DeletedBy\n    @Column(name = "DELETED_BY")\n    private String deletedBy;\n\n    @DeletedDate\n    @Column(name = "DELETED_DATE")\n    private OffsetDateTime deletedDate;\n\n'
+        java_traits_methods += "    public String getDeletedBy() {\n        return deletedBy;\n    }\n\n    public void setDeletedBy(String deletedBy) {\n        this.deletedBy = deletedBy;\n    }\n\n"
+        java_traits_methods += "    public OffsetDateTime getDeletedDate() {\n        return deletedDate;\n    }\n\n    public void setDeletedDate(OffsetDateTime deletedDate) {\n        this.deletedDate = deletedDate;\n    }\n\n"
+        dinamic_imports.add("import io.jmix.core.annotation.DeletedBy;")
+        dinamic_imports.add("import io.jmix.core.annotation.DeletedDate;")
+
+    # Generăm câmpurile de business și colectăm importurile necesare
+    java_business_fields = ""
+    java_business_methods = ""
+    is_first_text = True
+
+    for field in fields_list:
+        f_name = field["name"]
+        f_type = field["type"]
+        sql_col_name = f_name.upper()
+
+        # Colectăm tipurile în setul global unic
+        if f_type == "BigDecimal":
+            dinamic_imports.add("import java.math.BigDecimal;")
+        elif f_type == "LocalDate":
+            dinamic_imports.add("import java.time.LocalDate;")
+        elif f_type == "LocalDateTime":
+            dinamic_imports.add("import java.time.LocalDateTime;")
+
+        column_props = f'name = "{sql_col_name}"'
+        if field["mandatory"]:
+            column_props += ", nullable = false"
+
+        instance_name_annotation = ""
+        if f_type.lower() == "string" and is_first_text:
+            instance_name_annotation = "    @InstanceName\n"
+            is_first_text = False
+
+        java_business_fields += f"{instance_name_annotation}    @Column({column_props})\n    private {f_type} {f_name};\n\n"
+
+        f_caps = f_name[0].upper() + f_name[1:]
+        java_business_methods += f"    public {f_type} get{f_caps}() {{\n        return {f_name};\n    }}\n\n    public void set{f_caps}({f_type} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+    # Generăm câmpurile și metodele pentru relații
+    java_relation_fields = ""
+    java_relation_methods = ""
+
+    for rel in relations_list:
+        if rel["type"] == "N:1":
+            f_name = rel["field"]
+            tgt_class = rel["target"]
+            sql_fk_col = f"{f_name.upper()}_ID"
+
+            # Adăugăm importurile în setul global unic (Aici se colectau corect, dar se transformau prea devreme)
+            dinamic_imports.add("import jakarta.persistence.FetchType;")
+            dinamic_imports.add("import jakarta.persistence.ManyToOne;")
+            dinamic_imports.add("import jakarta.persistence.JoinColumn;")
+
+            join_props = f'name = "{sql_fk_col}"'
+            if rel["mandatory"]:
+                join_props += ", nullable = false"
+
+            java_relation_fields += f"    @JoinColumn({join_props})\n"
+            java_relation_fields += "    @ManyToOne(fetch = FetchType.LAZY)\n"
+            java_relation_fields += f"    private {tgt_class} {f_name};\n\n"
+
+            f_caps = f_name[0].upper() + f_name[1:]
+            java_relation_methods += f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
+            java_relation_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+        elif rel["type"] == "1:N":
+            f_name = rel["field"]  # ex: steps
+            tgt_class = rel["target"]  # ex: UserStep
+
+            # Determinăm automat numele câmpului invers (mappedBy) din entitatea țintă.
+            # Jmix folosește numele clasei sursă cu literă mică la început.
+            # Dacă clasa sursă are underscore (User_), îl eliminăm pentru a respecta proprietatea Java.
+            mapped_by_field = name[0].lower() + name[1:]
+            if mapped_by_field.endswith("_"):
+                mapped_by_field = mapped_by_field[:-1]  # ex: devine "user"
+
+            # Adăugăm importurile necesare în setul global dinamic
+            dinamic_imports.add("import jakarta.persistence.OneToMany;")
+            dinamic_imports.add("import java.util.List;")
+
+            # 1. Proprietatea de tip Listă (List<UserStep>)
+            java_relation_fields += f'    @OneToMany(mappedBy = "{mapped_by_field}")\n'
+            java_relation_fields += f"    private List<{tgt_class}> {f_name};\n\n"
+
+            # 2. Metodele Getter și Setter specifice colecției
+            f_caps = f_name[0].upper() + f_name[1:]
+            java_relation_methods += f"    public List<{tgt_class}> get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
+            java_relation_methods += f"    public void set{f_caps}(List<{tgt_class}> {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+        elif rel["type"] == "1:1":
+            f_name = rel["field"]
+            tgt_class = rel["target"]
+            sql_fk_col = f"{f_name.upper()}_ID"
+
+            dinamic_imports.add("import jakarta.persistence.OneToOne;")
+            dinamic_imports.add("import jakarta.persistence.FetchType;")
+            dinamic_imports.add("import jakarta.persistence.JoinColumn;")
+
+            join_props = f'name = "{sql_fk_col}"'
+            if rel["mandatory"]:
+                join_props += ", nullable = false"
+
+            java_relation_fields += f"    @JoinColumn({join_props})\n"
+            java_relation_fields += "    @OneToOne(fetch = FetchType.LAZY)\n"
+            java_relation_fields += f"    private {tgt_class} {f_name};\n\n"
+
+            f_caps = f_name[0].upper() + f_name[1:]
+            java_relation_methods += f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
+            java_relation_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+        elif rel["type"] == "N:N":
+            f_name = rel["field"]
+            tgt_class = rel["target"]
+            join_table_name = (
+                f"{name.upper()}_{tgt_class.upper()}_LINK"  # ex: USER__ROLE_LINK
+            )
+
+            src_fk_col = f"{name.upper()}_ID"
+            tgt_fk_col = f"{tgt_class.upper()}_ID"
+
+            dinamic_imports.add("import jakarta.persistence.ManyToMany;")
+            dinamic_imports.add("import jakarta.persistence.JoinTable;")
+            dinamic_imports.add("import jakarta.persistence.JoinColumn;")
+            dinamic_imports.add("import java.util.List;")
+
+            java_relation_fields += "    @ManyToMany\n"
+            java_relation_fields += f'    @JoinTable(name = "{join_table_name}",\n'
+            java_relation_fields += (
+                f'            joinColumns = @JoinColumn(name = "{src_fk_col}"),\n'
+            )
+            java_relation_fields += f'            inverseJoinColumns = @JoinColumn(name = "{tgt_fk_col}"))\n'
+            java_relation_fields += f"    private List<{tgt_class}> {f_name};\n\n"
+
+            f_caps = f_name[0].upper() + f_name[1:]
+            java_relation_methods += f"    public List<{tgt_class}> get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
+            java_relation_methods += f"    public void set{f_caps}(List<{tgt_class}> {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+    # CORECȚIE SECVENȚIALITATE: Transformăm tot setul de importuri în text abia ACUM, după ce s-a strâns totul!
+    imports_block = "\n".join(sorted(list(dinamic_imports)))
+    if imports_block:
+        imports_block += "\n"
+
+    # Structura finală a clasei Java
+    java_content = f"""package {COMPANY}.{project_name}.entity;
+
+import io.jmix.core.entity.annotation.JmixGeneratedValue;
+import io.jmix.core.metamodel.annotation.InstanceName;
+import io.jmix.core.metamodel.annotation.JmixEntity;
+import jakarta.persistence.*;
+import java.util.UUID;
+{imports_block}
+@JmixEntity
+{table_annotation}
+@Entity
+public class {name} {{
+
+    @Id
+    @Column(name = "ID", nullable = false)
+    @JmixGeneratedValue
+    private UUID id;
+
+{java_traits_fields}{java_business_fields}{java_relation_fields}    public UUID getId() {{
+        return id;
+    }}
+
+    public void setId(UUID id) {{
+        this.id = id;
+    }}
+
+{java_traits_methods}{java_business_methods}{java_relation_methods}}}
+"""
+
+    # Scriem fisierul direct in structura corecta a proiectului
     td = PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/entity"
     if not os.path.exists(td):
         os.makedirs(td)
 
-    java_path = td + "/" + n + ".java"
-    open(java_path, "w", encoding="utf-8").write(clasa_completa)
+    java_path = td + "/" + name + ".java"
+    open(java_path, "w", encoding="utf-8").write(java_content)
     print("✨ Entity mecanic salvat cu succes in: " + java_path)
+
+
+def gen_liquibase_changelog_from_csv(name, fields_list, traits):
+    timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    table_name = name.upper()
+
+    # 1. Maparea tipurilor din CSV în tipuri SQL recunoscute de Liquibase
+    def map_type(java_type):
+        jt = java_type.lower()
+        if jt in ["string", "text"]:
+            return "VARCHAR(255)"
+        if jt in ["integer", "int"]:
+            return "INT"
+        if jt in ["long"]:
+            return "BIGINT"
+        if jt in ["boolean", "bool"]:
+            return "BOOLEAN"
+        if jt in ["date", "localdate"]:
+            return "date"
+        if jt in ["datetime", "localdatetime", "offsetdatetime"]:
+            return "timestamp with time zone"
+        if jt in ["uuid"]:
+            return "UUID"
+        if jt in ["double"]:
+            return "double precision"
+        if jt in ["bigdecimal"]:
+            return "NUMERIC(19, 2)"
+        return "VARCHAR(255)"
+
+    # 2. Generarea coloanelor de infrastructură (Traits) în funcție de traits.csv
+    xml_traits_columns = '            <column name="ID" type="UUID">\n'
+    xml_traits_columns += f'                <constraints nullable="false" primaryKey="true" primaryKeyName="PK_{table_name}"/>\n'
+    xml_traits_columns += "            </column>\n"
+
+    if traits["versioned"]:
+        xml_traits_columns += '            <column name="VERSION" type="INT">\n                <constraints nullable="false" />\n            </column>\n'
+    if traits["audit_of_creation"]:
+        xml_traits_columns += (
+            '            <column name="CREATED_BY" type="VARCHAR(255)" />\n'
+        )
+        xml_traits_columns += '            <column name="CREATED_DATE" type="timestamp with time zone" />\n'
+    if traits["audit_of_modification"]:
+        xml_traits_columns += (
+            '            <column name="LAST_MODIFIED_BY" type="VARCHAR(255)" />\n'
+        )
+        xml_traits_columns += '            <column name="LAST_MODIFIED_DATE" type="timestamp with time zone" />\n'
+    if traits["soft_delete"]:
+        xml_traits_columns += (
+            '            <column name="DELETED_BY" type="VARCHAR(255)" />\n'
+        )
+        xml_traits_columns += '            <column name="DELETED_DATE" type="timestamp with time zone" />\n'
+
+    # 3. Generarea coloanelor de business și colectarea structurii de indecși unici
+    xml_business_columns = ""
+    xml_indexes = ""
+
+    for field in fields_list:
+        sql_col_name = field["name"].upper()
+        sql_type = map_type(field["type"])
+
+        # Constrângeri la nivel de coloană (ex: nullable)
+        constraints = ""
+        if field["mandatory"]:
+            constraints = '                <constraints nullable="false" />\n'
+
+        if constraints:
+            xml_business_columns += f'            <column name="{sql_col_name}" type="{sql_type}">\n{constraints}            </column>\n'
+        else:
+            xml_business_columns += (
+                f'            <column name="{sql_col_name}" type="{sql_type}" />\n'
+            )
+
+        # Dacă în CSV câmpul este marcat ca UNIQUE, generăm un element <createIndex> separat
+        # (Așa cum EclipseLink generează separat pe baza @Index)
+        if field["unique"]:
+            index_name = f"IDX_{table_name}_UNQ_{sql_col_name}"
+            xml_indexes += f"""
+    <changeSet id="{timestamp_id}-idx-{field["name"].lower()}" author="Test_jmix">
+        <createIndex tableName="{table_name}" indexName="{index_name}" unique="true">
+            <column name="{sql_col_name}"/>
+        </createIndex>
+    </changeSet>"""
+
+    # 4. Asamblarea structurii XML cu namespace-urile oficiale Jmix/Liquibase
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
+<databaseChangeLog
+	xmlns="http://liquibase.org"
+	xmlns:xsi="http://w3.org"
+	xsi:schemaLocation="http://liquibase.org
+                      http://liquibase.org/dbchangelog-latest.xsd"
+	objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS"
+>
+    <changeSet id="{timestamp_id}-1" author="Test_jmix">
+        <createTable tableName="{table_name}">
+{xml_traits_columns}{xml_business_columns}        </createTable>
+    </changeSet>{xml_indexes}
+</databaseChangeLog>
+"""
+
+    # 5. Salvarea fișierului pe disc în structura de subfoldere cronologice
+    current_year = datetime.now().strftime("%Y")
+    current_month = datetime.now().strftime("%m")
+    target_dir = (
+        PROIECT_PATH
+        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+    )
+    os.makedirs(target_dir, exist_ok=True)
+
+    filename = f"{target_dir}/{timestamp_id}-01_base-{name.lower()}.xml"
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(xml_content)
+    print(f" -> Generated Liquibase XML with Constraints & Indexes: {filename}")
+
+
+def get_relations_from_csv(csv_path, target_entity_name):
+    """Citește relations.csv și returnează doar relațiile unde entitatea curentă este sursa."""
+    relations_list = []
+    if not os.path.exists(csv_path):
+        return relations_list
+
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["source_entity"].strip().lower() == target_entity_name.lower():
+                relations_list.append(
+                    {
+                        "type": row["relation_type"].strip(),
+                        "target": row["target_entity"].strip(),
+                        "field": row["field_name"].strip(),
+                        "mandatory": row["mandatory"].strip().lower() == "true",
+                    }
+                )
+    return relations_list
+
+
+def gen_liquibase_relations_changelog(name, relations_list):
+    if not relations_list:
+        return
+
+    timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    src_table = name.upper()
+
+    xml_fk_content = ""
+    for rel in relations_list:
+        # === CAZUL 1: Relație N:1 (ManyToOne) ===
+        if rel["type"] == "N:1":
+            f_name = rel["field"].upper()
+            tgt_table = rel["target"].upper()
+            col_name = f"{f_name}_ID"
+            fk_name = f"FK_{src_table}_ON_{f_name}"
+            nullable_val = "false" if rel["mandatory"] else "true"
+
+            xml_fk_content += f"""
+    <changeSet id="{timestamp_id}-add-fk-{rel["field"].lower()}" author="Test_jmix">
+        <addColumn tableName="{src_table}">
+            <column name="{col_name}" type="UUID">
+                <constraints nullable="{nullable_val}"/>
+            </column>
+        </addColumn>
+        <addForeignKeyConstraint baseTableName="{src_table}"
+                                  baseColumnNames="{col_name}"
+                                  constraintName="{fk_name}"
+                                  referencedTableName="{tgt_table}"
+                                  referencedColumnNames="ID"/>
+    </changeSet>"""
+
+        # === CAZUL 2: Relație 1:1 (OneToOne) ===
+        # Adaugă o coloană UUID + Foreign Key + o constrângere UNIQUE pentru a asigura legătura de 1-la-1
+        elif rel["type"] == "1:1":
+            f_name = rel["field"].upper()
+            tgt_table = rel["target"].upper()
+            col_name = f"{f_name}_ID"
+            fk_name = f"FK_{src_table}_ON_{f_name}"
+            nullable_val = "false" if rel["mandatory"] else "true"
+
+            xml_fk_content += f"""
+    <changeSet id="{timestamp_id}-add-11-{rel["field"].lower()}" author="Test_jmix">
+        <addColumn tableName="{src_table}">
+            <column name="{col_name}" type="UUID">
+                <constraints nullable="{nullable_val}"/>
+            </column>
+        </addColumn>
+        <!-- Garantăm unicitatea la nivel SQL pentru 1:1 prin crearea unui Index UNIQUE -->
+        <createIndex tableName="{src_table}" indexName="IDX_{src_table}_UNQ_{col_name}" unique="true">
+            <column name="{col_name}"/>
+        </createIndex>
+        <addForeignKeyConstraint baseTableName="{src_table}"
+                                  baseColumnNames="{col_name}"
+                                  constraintName="{fk_name}"
+                                  referencedTableName="{tgt_table}"
+                                  referencedColumnNames="ID"/>
+    </changeSet>"""
+
+        # === CAZUL 3: Relație N:N (ManyToMany) ===
+        # NU adaugă coloane în tabelele existente, ci creează o tabelă complet nouă de legătură (Join Table)
+        elif rel["type"] == "N:N":
+            tgt_table = rel["target"].upper()
+            join_table = f"{src_table}_{tgt_table}_LINK"
+            src_fk = f"{src_table}_ID"
+            tgt_fk = f"{tgt_table}_ID"
+
+            xml_fk_content += f"""
+    <changeSet id="{timestamp_id}-create-nn-{join_table.lower()}" author="Test_jmix">
+        <createTable tableName="{join_table}">
+            <column name="{src_fk}" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="{tgt_fk}" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey tableName="{join_table}" columnNames="{src_fk}, {tgt_fk}" constraintName="PK_{join_table}"/>
+        <addForeignKeyConstraint baseTableName="{join_table}" baseColumnNames="{src_fk}"
+                                  constraintName="FK_{join_table}_ON_{src_table}"
+                                  referencedTableName="{src_table}" referencedColumnNames="ID"/>
+        <addForeignKeyConstraint baseTableName="{join_table}" baseColumnNames="{tgt_fk}"
+                                  constraintName="FK_{join_table}_ON_{tgt_table}"
+                                  referencedTableName="{tgt_table}" referencedColumnNames="ID"/>
+    </changeSet>"""
+
+    if not xml_fk_content:
+        return
+
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
+<databaseChangeLog
+	xmlns="http://liquibase.org"
+	xmlns:xsi="http://w3.org"
+	xsi:schemaLocation="http://liquibase.org
+                      http://liquibase.org/dbchangelog-latest.xsd"
+	objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS"
+>
+{xml_fk_content}
+</databaseChangeLog>
+"""
+
+    current_year = datetime.now().strftime("%Y")
+    current_month = datetime.now().strftime("%m")
+    target_dir = (
+        PROIECT_PATH
+        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+    )
+    os.makedirs(target_dir, exist_ok=True)
+
+    filename = f"{target_dir}/{timestamp_id}_02_relations_{name.lower()}.xml"
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(xml_content)
+    print(f" -> Generated Liquibase Relations XML: {filename}")
 
 
 def gen_list_ui(n, fi):
@@ -520,99 +943,38 @@ def update_menu(n):
         print("⚠️ Structura invalida pentru menu.xml (lipsete tag-ul </menu>)!")
 
 
-def gen_liquibase_changelog(n, fi):
-    # 1. Determinăm folderele
-    current_year = datetime.now().strftime("%Y")
-    current_month = datetime.now().strftime("%m")
-    timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
-
-    target_dir = (
-        PROIECT_PATH
-        + f"/src/main/resources/{company_path}/{project_name}/liquibase/changelog/{current_year}/{current_month}"
-    )
-    os.makedirs(target_dir, exist_ok=True)
-    filename = f"{target_dir}/{timestamp_id}-{n.lower()}.xml"
-    table_name = n.upper()
-
-    def map_type(java_type):
-        jt = java_type.lower()
-        if jt in ["string"]:
-            return "VARCHAR(255)"
-        if jt in ["integer"]:
-            return "INT"
-        if jt in ["long"]:
-            return "BIGINT"
-        if jt in ["boolean"]:
-            return "BOOLEAN"
-        if jt in ["localdatetime"]:
-            return "timestamp with time zone"
-        if jt in ["localdate"]:
-            return "DATE"
-        if jt in ["uuid"]:
-            return "UUID"
-        if jt in ["bigdecimal"]:
-            return "NUMERIC(19, 2)"
-        if jt in ["double"]:
-            return "double precision"
-        return "VARCHAR(255)"
-
-    # 2. Procesăm lista returnată de get_fields
-    fields_list = get_fields(fi)
-
-    xml_columns = ""
-    for f_name, f_type in fields_list:
-        sql_col_name = f_name.upper()
-        sql_type = map_type(f_type)
-        xml_columns += (
-            f'            <column name="{sql_col_name}" type="{sql_type}" />\n'
-        )
-
-    # Structura XML
-    xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
-    <databaseChangeLog
-            xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
-            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-            xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
-                          http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd"
-            objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS">
-    <changeSet id="{timestamp_id}-1" author="{PROJECT}">
-        <createTable tableName="{table_name}">
-            <column name="ID" type="UUID">
-                <constraints
-					nullable="false"
-					primaryKey="true"
-					primaryKeyName="PK_{table_name}"
-				/>
-            </column>
-            <column name="VERSION" type="INT">
-                <constraints nullable="false" />
-            </column>
-            <column name="CREATED_BY" type="VARCHAR(255)" />
-            <column name="CREATED_DATE" type="timestamp with time zone" />
-            <column name="LAST_MODIFIED_BY" type="VARCHAR(255)" />
-            <column name="LAST_MODIFIED_DATE" type="timestamp with time zone" />
-{xml_columns}        </createTable>
-    </changeSet>
-</databaseChangeLog>
-"""
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(xml_content)
-    print(f" -> Generated Liquibase XML via get_fields(): {filename}")
-
-
 if __name__ == "__main__":
-    if len(sys.argv) > 3:
-        a, name, fields = sys.argv[1], sys.argv[2], sys.argv[3]
-        if a == "entity":
-            gen_entity_mechanic(name, fields)
-            update_messages_entity(name, fields)
-            gen_liquibase_changelog(name, fields)
-        elif a == "ui-list":
-            gen_list_ui(name, fields)
-            update_menu(name)
-        elif a == "ui-detail":
-            gen_detail_ui(name, fields)
+    # Verificăm corect numărul minim de argumente (script + acțiune + nume entitate)
+    if len(sys.argv) < 3:
+        print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
+        sys.exit(1)
+
+    action = sys.argv[1]  # Ex: entity
+    name = sys.argv[2]  # Ex: Department
+
+    if action == "entity":
+        # Preluăm datele normalizate din cele 3 fișiere CSV din rădăcină
+        traits = get_traits_from_csv("traits.csv", name)
+        fields_list = get_entities_from_csv("entities.csv", name)
+        relations_list = get_relations_from_csv("relations.csv", name)
+
+        if not fields_list:
+            print(f" ! Nu s-au găsit câmpuri pentru entitatea '{name}' în entities.csv")
+            sys.exit(1)
+
+        print(f"Generating Entity {name} from CSV architecture...")
+        gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
+        gen_liquibase_changelog_from_csv(name, fields_list, traits)
+        if relations_list:
+            gen_liquibase_relations_changelog(name, relations_list)
+
+    # elif action == "ui-list":
+    #     gen_list_ui(name, fields_list)
+    #     update_menu(name)
+    # elif action == "ui-detail":
+    #     gen_detail_ui(name, fields_list)
     else:
-        print("Usage: python3 generator.py <entity|ui-list|ui-detail> <name> <fields>")
-        exit(1)
+        print(
+            f" ! Acțiune necunoscută: '{action}'. Folosește entity, ui-list sau ui-detail."
+        )
+        sys.exit(1)
