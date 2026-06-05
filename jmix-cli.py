@@ -561,324 +561,328 @@ def gen_liquibase_relations_changelog(name, relations_list):
     print(f" -> Generated Liquibase Relations XML: {filename}")
 
 
-def gen_list_ui(n, fi):
-    print("Generating List UI Mechanically...")
-    j = (
-        "package " + COMPANY + "." + project_name + ".view." + n.lower() + ";\n"
-        "import " + COMPANY + "." + project_name + ".entity." + n + ";\n"
-        "import " + COMPANY + "." + project_name + ".view.main.MainView;\n"
-        "import com.vaadin.flow.router.Route;\n"
-        "import io.jmix.flowui.view.*;\n\n"
-        '@Route(value="' + n.lower() + 's", layout=MainView.class)\n'
-        '@ViewController(id = "' + n + '.list")\n'
-        '@ViewDescriptor(path = "' + n.lower() + '-list-view.xml")\n'
-        '@LookupComponent("' + n.lower() + 'sDataGrid")\n'
-        '@DialogMode(width = "64em")\n'
-        "public class " + n + "ListView extends StandardListView<" + n + "> {}"
-    )
-    cols = ""
-    for name, _ in get_fields(fi):
-        cols += '                <column property="' + name + '"/>\n'
+def gen_list_view_from_csv(name, fields_list, relations_list=[]):
+    lower_name = name.lower()
 
-    x = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
-        '<view xmlns="http://jmix.io/schema/flowui/view"\n'
-        '      title="msg://' + n.lower() + 'ListView.title"\n'
-        '      focusComponent="' + n.lower() + 'sDataGrid">\n'
-        "    <data>\n"
-        '        <collection id="' + n.lower() + 'sDc"\n'
-        '                    class="'
-        + COMPANY
-        + "."
-        + project_name
-        + ".entity."
-        + n
-        + '">\n'
-        '            <loader id="' + n.lower() + 'sDl" readOnly="true">\n'
-        "                <query>\n"
-        "                    <![CDATA[select e from " + n + " e]]>\n"
-        "                </query>\n"
-        "            </loader>\n"
-        "        </collection>\n"
-        "    </data>\n"
-        "    <facets>\n"
-        '        <dataLoadCoordinator auto="true"/>\n'
-        "        <urlQueryParameters>\n"
-        '            <genericFilter component="genericFilter"/>\n'
-        '            <pagination component="pagination"/>\n'
-        "        </urlQueryParameters>\n"
-        "    </facets>\n"
-        "    <actions>\n"
-        '        <action id="selectAction" type="lookup_select"/>\n'
-        '        <action id="discardAction" type="lookup_discard"/>\n'
-        "    </actions>\n"
-        "    <layout>\n"
-        '        <genericFilter id="genericFilter"\n'
-        '               dataLoader="' + n.lower() + 'sDl">\n'
-        '            <properties include=".*"/>\n'
-        "        </genericFilter>\n"
-        '        <hbox id="buttonsPanel" classNames="buttons-panel">\n'
-        "            <startSlot>\n"
-        '                <button id="createButton" action="'
-        + n.lower()
-        + 'sDataGrid.createAction"/>\n'
-        '                <button id="editButton" action="'
-        + n.lower()
-        + 'sDataGrid.editAction"/>\n'
-        '                <button id="removeButton" action="'
-        + n.lower()
-        + 'sDataGrid.removeAction"/>\n'
-        "            </startSlot>\n"
-        "            <endSlot>\n"
-        '                <simplePagination id="pagination" dataLoader="'
-        + n.lower()
-        + 'sDl"/>\n'
-        "            </endSlot>\n"
-        "        </hbox>\n"
-        '        <dataGrid id="' + n.lower() + 'sDataGrid"\n'
-        '                  width="100%"\n'
-        '                  minHeight="20em"\n'
-        '                  dataContainer="' + n.lower() + 'sDc"\n'
-        '                  columnReorderingAllowed="true">\n'
-        "            <actions>\n"
-        '                <action id="createAction" type="list_create"/>\n'
-        '                <action id="editAction" type="list_edit"/>\n'
-        '                <action id="removeAction" type="list_remove"/>\n'
-        "            </actions>\n"
-        '            <columns  resizable="true">\n' + cols + "            </columns>\n"
-        "        </dataGrid>\n"
-        '        <hbox id="lookupActions" visible="false">\n'
-        '            <button id="selectButton" action="selectAction"/>\n'
-        '            <button id="discardButton" action="discardAction"/>\n'
-        "        </hbox>\n"
-        "    </layout>\n"
-        "</view>\n"
-    )
+    # 1. Generăm coloanele simple din entities.csv
+    xml_columns = ""
+    for field in fields_list:
+        f_name = field["name"]
+        xml_columns += f'            <column property="{f_name}"/>\n'
 
-    jd = (
-        PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/view/" + n.lower()
-    )
-    xd = (
-        PROIECT_PATH
-        + f"/src/main/resources/{company_path}/{project_name}/view/"
-        + n.lower()
-    )
+    # 2. Generăm dinamic planul de extragere (Fetch Plan) și coloanele pentru relații
+    xml_fetch_plan_properties = ""
+    for rel in relations_list:
+        if rel["type"] == "N:1":
+            f_name = rel["field"]  # ex: step, user
 
-    if not os.path.exists(jd):
-        os.makedirs(jd)
-    if not os.path.exists(xd):
-        os.makedirs(xd)
-
-    open(jd + "/" + n + "ListView.java", "w", encoding="utf-8").write(j)
-    open(xd + "/" + n.lower() + "-list-view.xml", "w", encoding="utf-8").write(x)
-    print("✨ List View mecanic salvat!")
-
-
-def gen_detail_ui(n, fi):
-    print("Generating Detail UI Mechanically...")
-
-    # 1. Controller Java pentru ecranul de Detaliu
-    j = (
-        "package " + COMPANY + "." + project_name + ".view." + n.lower() + ";\n\n"
-        "import " + COMPANY + "." + project_name + ".entity." + n + ";\n"
-        "import " + COMPANY + "." + project_name + ".view.main.MainView;\n"
-        "import com.vaadin.flow.router.Route;\n"
-        "import io.jmix.flowui.view.*;\n\n"
-        '@Route(value="' + n.lower() + 's/:id", layout=MainView.class)\n'
-        '@ViewController(id = "' + n + '.detail")\n'
-        '@ViewDescriptor(path = "' + n.lower() + '-detail-view.xml")\n'
-        '@EditedEntityContainer("' + n.lower() + 'Dc")\n'
-        "public class " + n + "DetailView extends StandardDetailView<" + n + "> {}"
-    )
-
-    # 2. Maparea mecanica a campurilor din formular in functie de tipul Java
-    flds = ""
-    for name, t in get_fields(fi):
-        if t == "LocalDate":
-            flds += (
-                '            <datePicker id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '"/>\n'
+            # Îi spunem Fetch Plan-ului să încarce și proprietatea de relație cu atributele ei de bază (_base)
+            xml_fetch_plan_properties += (
+                f'                <property name="{f_name}" fetchPlan="_base"/>\n'
             )
-        elif t == "Boolean":
-            flds += (
-                '            <checkbox id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '"/>\n'
+
+            # Adăugăm coloana în tabel folosind formatul cu punct (proprietate.numeCâmpInstanță)
+            # În Jmix, dacă pui direct property="step", el va apela automat câmpul marcat cu @InstanceName din acea entitate!
+            xml_columns += f'            <column property="{f_name}"/>\n'
+
+    # Construim blocul de Fetch Plan doar dacă avem relații definite
+    xml_fetch_plan_block = ""
+    if xml_fetch_plan_properties:
+        xml_fetch_plan_block = f"""            <fetchPlan extends="_base">
+{xml_fetch_plan_properties}            </fetchPlan>"""
+
+    # 3. Structura XML FlowUI pentru Listă complet funcțională
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<view xmlns="http://jmix.io/schema/flowui/view"
+	  xmlns:c="http://jmix.io/schema/flowui/jpql-condition"
+      title="msg://{lower_name}ListView.title"
+      focusComponent="{lower_name}sDataGrid">
+    <data readOnly="true">
+        <collection id="{lower_name}sDc" class="{COMPANY}.{project_name}.entity.{name}">
+{xml_fetch_plan_block}
+            <loader id="{lower_name}sDl" readOnly="true">
+                <query>[![CDATA[select e from {name} e]]</query>
+            </loader>
+        </collection>
+    </data>
+    <facets>
+        <dataLoadCoordinator auto="true"/>
+    </facets>
+    <layout>
+        <hbox id="buttonsPanel" classNames="buttons-panel">
+            <button id="createBtn" action="{lower_name}sDataGrid.create"/>
+            <button id="editBtn" action="{lower_name}sDataGrid.edit"/>
+            <button id="removeBtn" action="{lower_name}sDataGrid.remove"/>
+        </hbox>
+        <dataGrid id="{lower_name}sDataGrid" width="100%" minHeight="20em" dataContainer="{lower_name}sDc">
+            <actions>
+                <action id="create" type="list_create"/>
+                <action id="edit" type="list_edit"/>
+                <action id="remove" type="list_remove"/>
+            </actions>
+            <columns>
+{xml_columns}            </columns>
+        </dataGrid>
+    </layout>
+</view>
+"""
+
+    # 4. Structura Controllerului Java pentru Listă
+    java_content = f"""package {COMPANY}.{project_name}.view.{lower_name};
+
+import {COMPANY}.{project_name}.entity.{name};
+import {COMPANY}.{project_name}.view.main.MainView;
+import com.vaadin.flow.router.Route;
+import io.jmix.flowui.view.*;
+
+@Route(value = "{lower_name}s", layout = MainView.class)
+@ViewController("{name}.list")
+@ViewDescriptor("{lower_name}-list-view.xml")
+@LookupComponent("{lower_name}sDataGrid")
+@DialogMode(width = "64em", height = "48em")
+public class {name}ListView extends StandardListView<{name}> {{
+}}
+"""
+
+    # Scrierea fișierelor pe disc
+    view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
+    java_dir = (
+        f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
+    )
+    os.makedirs(view_dir, exist_ok=True)
+    os.makedirs(java_dir, exist_ok=True)
+
+    with open(f"{view_dir}/{lower_name}-list-view.xml", "w", encoding="utf-8") as f:
+        f.write(xml_content)
+    with open(f"{java_dir}/{name}ListView.java", "w", encoding="utf-8") as f:
+        f.write(java_content)
+    print(f" 🖥️ List View generat cu succes pentru: {name}")
+
+
+def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
+    lower_name = name.lower()
+
+    # 1. Generăm componentele de formular în mod dinamic
+    xml_form_components = ""
+    for field in fields_list:
+        f_name = field["name"]
+        f_type = field["type"].lower()
+
+        if f_type in ["boolean", "bool"]:
+            xml_form_components += (
+                f'            <checkbox id="{f_name}Field" property="{f_name}"/>\n'
             )
-        elif t == "BigDecimal":
-            flds += (
-                '            <textField id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '" width="100%" datatype="decimal"/>\n'
-            )
-        elif t == "Integer":
-            flds += (
-                '            <textField id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '" width="100%" datatype="int"/>\n'
-            )
-        elif t == "Long":
-            flds += (
-                '            <textField id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '" width="100%" datatype="long"/>\n'
-            )
-        elif t == "Double":
-            flds += (
-                '            <textField id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '" width="100%" datatype="double"/>\n'
+        elif f_type in ["date", "localdate", "datetime", "localdatetime"]:
+            xml_form_components += (
+                f'            <datePicker id="{f_name}Field" property="{f_name}"/>\n'
             )
         else:
-            flds += (
-                '            <textField id="'
-                + name
-                + 'Field" property="'
-                + name
-                + '" width="100%"/>\n'
+            xml_form_components += (
+                f'            <textField id="{f_name}Field" property="{f_name}"/>\n'
             )
 
-    # 3. Structura XML nativa conform Jmix Studio
-    x = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
-        '<view xmlns="http://jmix.io/schema/flowui/view"\n'
-        '      title="msg://' + n.lower() + 'DetailView.title">\n'
-        "    <data>\n"
-        '        <instance id="' + n.lower() + 'Dc"\n'
-        '                    class="'
-        + COMPANY
-        + "."
-        + project_name
-        + ".entity."
-        + n
-        + '">\n'
-        '            <fetchPlan extends="_base"/>\n'
-        '            <loader id="' + n.lower() + 'Dl"/>\n'
-        "        </instance>\n"
-        "    </data>\n"
-        "    <facets>\n"
-        '        <dataLoadCoordinator auto="true"/>\n'
-        "    </facets>\n"
-        "    <actions>\n"
-        '        <action id="saveAction" type="detail_saveClose"/>\n'
-        '        <action id="closeAction" type="detail_close"/>\n'
-        "    </actions>\n"
-        '    <layout expand="form" spacing="true">\n'
-        '        <formLayout id="form" dataContainer="' + n.lower() + 'Dc">\n'
-        "            <responsiveSteps>\n"
-        '                <responsiveStep minWidth="0" columns="1"/>\n'
-        '                <responsiveStep minWidth="40em" columns="2"/>\n'
-        "            </responsiveSteps>\n" + flds + "        </formLayout>\n"
-        '        <hbox id="detailActions" classNames="buttons-panel">\n'
-        '            <button id="saveAndCloseButton" action="saveAction"/>\n'
-        '            <button id="closeButton" action="closeAction"/>\n'
-        "        </hbox>\n"
-        "    </layout>\n"
-        "</view>\n"
+    # 2. Adăugăm componenta inteligentă entityComboBox pentru relațiile N:1
+    xml_relation_data_containers = ""
+    for rel in relations_list:
+        if rel["type"] == "N:1":
+            f_name = rel["field"]  # ex: step, user
+            tgt_class = rel["target"]  # ex: Step, User_
+            tgt_lower = tgt_class.lower()
+
+            # Construim un CollectionContainer dinamic pentru a încărca datele din tabela țintă
+            xml_relation_data_containers += f'        <collection id="{tgt_lower}sDc" class="{COMPANY}.{project_name}.entity.{tgt_class}">\n'
+            xml_relation_data_containers += '            <fetchPlan extends="_base"/>\n'
+            xml_relation_data_containers += (
+                f'            <loader id="{tgt_lower}sDl">\n'
+            )
+            xml_relation_data_containers += f"                <query>[![CDATA[select e from {tgt_class} e]]</query>\n"
+            xml_relation_data_containers += "            </loader>\n"
+            xml_relation_data_containers += "        </collection>\n"
+
+            # Adăugam componenta entityCombobox conectată la itemsContainer
+            xml_form_components += f'            <entityComboBox id="{f_name}Field" property="{f_name}" itemsContainer="{tgt_lower}sDc"/>\n'
+
+    # 2. Structura XML FlowUI pentru Detaliu
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<view xmlns="http://jmix.io/schema/flowui/view"
+      title="msg://{lower_name}DetailView.title"
+      focusComponent="form">
+    <data>
+    	<instance id="{lower_name}Dc"
+                  class="{COMPANY}.{project_name}.entity.{name}">
+            <fetchPlan extends="_base"/>
+            <loader id="{lower_name}Dl"/>
+        </instance>
+{xml_relation_data_containers}    </data>
+    <facets>
+        <dataLoadCoordinator auto="true"/>
+    </facets>
+    <layout classNames="fluid-layout" width="100%">
+        <formLayout id="form" dataContainer="{lower_name}Dc">
+{xml_form_components}        </formLayout>
+        <hbox id="detailActions">
+            <button id="saveAndCloseBtn" action="saveAction"/>
+            <button id="closeBtn" action="closeAction"/>
+        </hbox>
+    </layout>
+</view>
+"""
+
+    # 3. Structura Controllerului Java pentru Detaliu
+    java_content = f"""package {COMPANY}.{project_name}.view.{lower_name};
+
+import {COMPANY}.{project_name}.entity.{name};
+import {COMPANY}.{project_name}.view.main.MainView;
+import com.vaadin.flow.router.Route;
+import io.jmix.flowui.view.*;
+
+@Route(value = "{lower_name}s/:id", layout = MainView.class)
+@ViewController("{name}.detail")
+@ViewDescriptor("{lower_name}-detail-view.xml")
+@EditedEntityContainer("{lower_name}Dc")
+public class {name}DetailView extends StandardDetailView<{name}> {{
+}}
+"""
+
+    view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
+    java_dir = (
+        f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
     )
+    os.makedirs(view_dir, exist_ok=True)
+    os.makedirs(java_dir, exist_ok=True)
 
-    jd = (
-        PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/view/" + n.lower()
-    )
-    xd = (
-        PROIECT_PATH
-        + f"/src/main/resources/{company_path}/{project_name}/view/"
-        + n.lower()
-    )
-
-    if not os.path.exists(jd):
-        os.makedirs(jd)
-    if not os.path.exists(xd):
-        os.makedirs(xd)
-
-    open(jd + "/" + n + "DetailView.java", "w", encoding="utf-8").write(j)
-    open(xd + "/" + n.lower() + "-detail-view.xml", "w", encoding="utf-8").write(x)
-    print("✨ Detail View mecanic salvat!")
+    with open(f"{view_dir}/{lower_name}-detail-view.xml", "w", encoding="utf-8") as f:
+        f.write(xml_content)
+    with open(f"{java_dir}/{name}DetailView.java", "w", encoding="utf-8") as f:
+        f.write(java_content)
+    print(f" 🖥️ Detail View generat cu succes pentru: {name}")
 
 
-def update_messages_entity(n, fi):
+def update_messages_entity(n, fields_list, traits, relations_list=[]):
     print("Generating localization messages for " + n + "...")
-    fields_list = get_fields(fi)
 
-    # Definim calea catre cele doua fisiere din proiectul tau Gradle
+    # Definim calea către cele două fișiere din proiectul tău parametric
     base_path = PROIECT_PATH + f"/src/main/resources/{company_path}/{project_name}"
     en_path = base_path + "/messages_en.properties"
     ro_path = base_path + "/messages_ro.properties"
 
-    # 1. Pregatim traducerile pentru limba Engleza (Mecanic)
+    # Inițializăm listele de traduceri
     en_lines = []
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Version")
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Created by")
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Created date")
-    en_lines.append(
-        f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Last modified by"
-    )
-    en_lines.append(
-        f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Last modified date"
-    )
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Deleted by")
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Deleted date")
+    ro_lines = []
 
-    for f_name, _ in fields_list:
-        # Transforma camelCase in text separat (ex: creditLimit -> Credit limit)
-        spaced_name = re.sub(r"(?<!^)(?=[A-Z])", " ", f_name).lower()
-        readable_en = spaced_name[0].upper() + spaced_name[1:]
+    # Definim traducerile statice standard pentru pachetul entității
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
+
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
+
+    # Injectăm dinamic liniile de audit și versiune doar dacă sunt activate în traits.csv
+    if traits["versioned"]:
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Version")
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Versiune")
+
+    if traits["audit_of_creation"]:
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Created by")
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Created date")
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Creat de")
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data crearii")
+
+    if traits["audit_of_modification"]:
+        en_lines.append(
+            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Last modified by"
+        )
+        en_lines.append(
+            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Last modified date"
+        )
+        ro_lines.append(
+            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Modificat de"
+        )
+        ro_lines.append(
+            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificarii"
+        )
+
+    if traits["soft_delete"]:
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Deleted by")
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Deleted date")
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Sters de")
+        ro_lines.append(
+            f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data stergerii"
+        )
+
+    # 1. GENERAREA ȘI TRADUCEREA CÂMPURILOR DE BUSINESS (entities.csv)
+    for field in fields_list:
+        f_name = field["name"]
+
+        # CORECȚIE CAPITALIZARE: Luăm prima literă mare și adăugăm restul textului
+        readable_en = f_name[0].upper() + f_name[1:]
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
 
-    # Adaugam si titlurile pentru ecranele UI generate anterior
+        prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
+        try:
+            traducere_ro = (
+                requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={
+                        "model": "translategemma:4b",
+                        "prompt": prompt,
+                        "stream": False,
+                    },
+                    timeout=5,
+                )
+                .json()
+                .get("response", "")
+                .strip()
+            )
+        except Exception:
+            traducere_ro = ""
+
+        # CORECȚIE PLASĂ DE SIGURANȚĂ: Folosim funcția len() curat, salvată într-o variabilă separată
+        lungime_text = len(traducere_ro)
+        if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
+            traducere_ro = readable_en
+
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
+
+    # 2. GENERAREA ȘI TRADUCEREA ETICHETELOR DE RELAȚIE (relations.csv)
+    for rel in relations_list:
+        f_name = rel["field"]
+
+        readable_en = f_name[0].upper() + f_name[1:]
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
+
+        prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
+        try:
+            traducere_ro = (
+                requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={
+                        "model": "translategemma:4b",
+                        "prompt": prompt,
+                        "stream": False,
+                    },
+                    timeout=5,
+                )
+                .json()
+                .get("response", "")
+                .strip()
+            )
+        except Exception:
+            traducere_ro = ""
+
+        lungime_text = len(traducere_ro)
+        if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
+            traducere_ro = readable_en
+
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
+
+    # 3. TITLURILE PENTRU ECRANELE VIZUALE UI GENERATE
     en_lines.append(
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={n}s"
     )
     en_lines.append(
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={n} detail"
     )
-
-    # 2. Pregatim traducerile pentru limba Romana (Folosind AI-ul tau local din Ollama pentru traducere)
-    ro_lines = []
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Versiune")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Creat de")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data crearii")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Modificat de")
-    ro_lines.append(
-        f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificarii"
-    )
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Sters de")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data stergerii")
-
-    for f_name, _ in fields_list:
-        spaced_name = re.sub(r"(?<!^)(?=[A-Z])", " ", f_name).lower()
-        # Cerem modelului de 3B sa traduca doar numele campului curent
-        prompt = f"Translate the following English technical field name to Romanian. Output ONLY the translated name, capitalized, nothing else. Text: '{spaced_name}'"
-        traducere_ro = (
-            requests.post(
-                "http://localhost:11434/api/generate",
-                json={"model": "qwen2.5-coder:3b", "prompt": prompt, "stream": False},
-            )
-            .json()
-            .get("response", "")
-            .strip()
-        )
-        # Plasa de siguranta in caz de lipsa serviciu
-        if not traducere_ro or "Error" in traducere_ro:
-            traducere_ro = spaced_name.capitalize()
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
 
     ro_lines.append(
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title=Lista {n}"
@@ -887,7 +891,7 @@ def update_messages_entity(n, fi):
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title=Detalii {n}"
     )
 
-    # 3. Functie interna sigura care scrie in fisier fara sa duplice liniile existente
+    # 4. Funcția ta internă sigură care adaugă liniile unice
     def append_unique(file_path, lines_to_add):
         existing_content = ""
         if os.path.exists(file_path):
@@ -895,7 +899,6 @@ def update_messages_entity(n, fi):
                 existing_content = f.read()
 
         with open(file_path, "a", encoding="utf-8") as f:
-            # Daca fisierul nu se termina cu newline, adaugam unul ca sa nu lipim prima linie noua de textul vechi
             if existing_content and not existing_content.endswith("\n"):
                 f.write("\n")
             for line in lines_to_add:
@@ -964,15 +967,28 @@ if __name__ == "__main__":
 
         print(f"Generating Entity {name} from CSV architecture...")
         gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
+        update_messages_entity(name, fields_list, traits, relations_list)
         gen_liquibase_changelog_from_csv(name, fields_list, traits)
         if relations_list:
             gen_liquibase_relations_changelog(name, relations_list)
 
-    # elif action == "ui-list":
-    #     gen_list_ui(name, fields_list)
-    #     update_menu(name)
-    # elif action == "ui-detail":
-    #     gen_detail_ui(name, fields_list)
+    elif action == "ui-list":
+        fields_list = get_entities_from_csv("entities.csv", name)
+        relations_list = get_relations_from_csv("relations.csv", name)
+        if not fields_list:
+            print(f" ! Erorare: Câmpurile pentru {name} nu există în entities.csv")
+            sys.exit(1)
+        gen_list_view_from_csv(name, fields_list, relations_list)
+        update_menu(name)  # adaugă meniul automat, așa cum făceai în variabila ta veche
+
+    elif action == "ui-detail":
+        fields_list = get_entities_from_csv("entities.csv", name)
+        relations_list = get_relations_from_csv("relations.csv", name)
+        if not fields_list:
+            print(f" ! Erorare: Câmpurile pentru {name} nu există în entities.csv")
+            sys.exit(1)
+        gen_detail_view_from_csv(name, fields_list, relations_list)
+
     else:
         print(
             f" ! Acțiune necunoscută: '{action}'. Folosește entity, ui-list sau ui-detail."
