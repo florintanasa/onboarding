@@ -3,3 +3,4 @@ Department,true,false,false,false
 Step,true,false,false,false
 User_,true,true,true,false
 UserStep,true,true,true,true
+OnboardingStatus,true,false,false,false
