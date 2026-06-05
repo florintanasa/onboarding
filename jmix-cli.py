@@ -761,33 +761,26 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
 def update_messages_entity(n, fields_list, traits, relations_list=[]):
     print("Generating localization messages for " + n + "...")
 
-    # Definim calea către cele două fișiere din proiectul tău parametric
     base_path = PROIECT_PATH + f"/src/main/resources/{company_path}/{project_name}"
     en_path = base_path + "/messages_en.properties"
     ro_path = base_path + "/messages_ro.properties"
 
-    # Inițializăm listele de traduceri
     en_lines = []
     ro_lines = []
 
-    # Definim traducerile statice standard pentru pachetul entității
     en_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
     ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
-
     en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
     ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
 
-    # Injectăm dinamic liniile de audit și versiune doar dacă sunt activate în traits.csv
     if traits["versioned"]:
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Version")
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Versiune")
-
     if traits["audit_of_creation"]:
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Created by")
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Created date")
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Creat de")
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data crearii")
-
     if traits["audit_of_modification"]:
         en_lines.append(
             f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Last modified by"
@@ -801,7 +794,6 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
         ro_lines.append(
             f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificarii"
         )
-
     if traits["soft_delete"]:
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Deleted by")
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Deleted date")
@@ -814,8 +806,13 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
     for field in fields_list:
         f_name = field["name"]
 
-        # CORECȚIE CAPITALIZARE: Luăm prima literă mare și adăugăm restul textului
-        readable_en = f_name[0].upper() + f_name[1:]
+        # LOGICĂ SIGURĂ ÎN LOC DE REGEX: Separă camelCase cu spații (ex: dueDate -> due date)
+        spaced_name = (
+            "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
+        )
+
+        # CORECȚIE LOGICĂ: readable_en se construiește din spaced_name, având doar prima literă mare!
+        readable_en = spaced_name.capitalize()
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
 
         prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
@@ -837,7 +834,6 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
         except Exception:
             traducere_ro = ""
 
-        # CORECȚIE PLASĂ DE SIGURANȚĂ: Folosim funcția len() curat, salvată într-o variabilă separată
         lungime_text = len(traducere_ro)
         if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
             traducere_ro = readable_en
@@ -848,7 +844,11 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
     for rel in relations_list:
         f_name = rel["field"]
 
-        readable_en = f_name[0].upper() + f_name[1:]
+        # Separă camelCase cu spații pentru relații
+        spaced_name = (
+            "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
+        )
+        readable_en = spaced_name.capitalize()
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
 
         prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
@@ -891,7 +891,7 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title=Detalii {n}"
     )
 
-    # 4. Funcția ta internă sigură care adaugă liniile unice
+    # 4. Funcția internă care adaugă liniile unice
     def append_unique(file_path, lines_to_add):
         existing_content = ""
         if os.path.exists(file_path):
