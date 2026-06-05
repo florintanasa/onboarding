@@ -397,10 +397,10 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
     # 4. Asamblarea structurii XML cu namespace-urile oficiale Jmix/Liquibase
     xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
 <databaseChangeLog
-	xmlns="http://liquibase.org"
-	xmlns:xsi="http://w3.org"
-	xsi:schemaLocation="http://liquibase.org
-                      http://liquibase.org/dbchangelog-latest.xsd"
+	xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd"
 	objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS"
 >
     <changeSet id="{timestamp_id}-1" author="Test_jmix">
@@ -537,10 +537,10 @@ def gen_liquibase_relations_changelog(name, relations_list):
 
     xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
 <databaseChangeLog
-	xmlns="http://liquibase.org"
-	xmlns:xsi="http://w3.org"
-	xsi:schemaLocation="http://liquibase.org
-                      http://liquibase.org/dbchangelog-latest.xsd"
+	xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd"
 	objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS"
 >
 {xml_fk_content}
