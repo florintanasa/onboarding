@@ -1,5 +1,5 @@
 entity_name,versioned,audit_of_creation,audit_of_modification,soft_delete
 Department,true,false,false,false
 Step,true,false,false,false
-User,true,true,true,false
+User_,true,true,true,false
 UserStep,true,true,true,true
