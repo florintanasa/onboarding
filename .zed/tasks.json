@@ -1,0 +1,16 @@
+[
+	{
+		"label": "Jmix 🚀 Run App (bootRun)",
+		"command": "./gradlew bootRun",
+		// Această comandă pornește aplicația și execută migrările Liquibase
+		"use_new_terminal": false,
+		"allow_concurrent_runs": false,
+	},
+	{
+		"label": "Jmix 🧹 Full Clean & Build",
+		"command": "./gradlew clean build -x test",
+		// Această comandă este echivalentul compilării
+		"use_new_terminal": false,
+		"allow_concurrent_runs": false,
+	},
+]
