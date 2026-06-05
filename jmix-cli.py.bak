@@ -1,0 +1,749 @@
+import csv
+import os
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import requests
+
+PROIECT_PATH = str(Path.cwd())
+
+
+def get_project_name(settings_path: Path = Path("settings.gradle")) -> str | None:
+    text = settings_path.read_text(encoding="utf-8")
+    # caută rootProject.name = 'name' sau "name"
+    m = re.search(r"""rootProject\.name\s*=\s*(['"])(.*?)\1""", text)
+    return m.group(2) if m else None
+
+
+PROJECT = get_project_name()
+project_name = (PROJECT or "").lower()
+
+
+def get_company_name(settings_path: Path = Path("build.gradle")) -> str | None:
+    text = settings_path.read_text(encoding="utf-8")
+    # caută group = 'com.company' sau "com.company"
+    m = re.search(r"""group\s*=\s*(['"])(.*?)\1""", text)
+    return m.group(2) if m else None
+
+
+COMPANY = get_company_name() or ""
+company_path = COMPANY.replace(".", "/")
+
+
+def get_traits_from_csv(csv_path, target_entity_name):
+    """Citește traits.csv și returnează trăsăturile globale ale entității."""
+    traits = {
+        "versioned": True,
+        "audit_of_creation": True,
+        "audit_of_modification": True,
+        "soft_delete": False,
+    }
+    if not os.path.exists(csv_path):
+        return traits
+
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["entity_name"].strip().lower() == target_entity_name.lower():
+                traits["versioned"] = row["versioned"].strip().lower() == "true"
+                traits["audit_of_creation"] = (
+                    row["audit_of_creation"].strip().lower() == "true"
+                )
+                traits["audit_of_modification"] = (
+                    row["audit_of_modification"].strip().lower() == "true"
+                )
+                traits["soft_delete"] = row["soft_delete"].strip().lower() == "true"
+                break
+    return traits
+
+
+def get_entities_from_csv(csv_path, target_entity_name):
+    """Citește entities.csv și extrage doar câmpurile de business ale entității."""
+    fields_list = []
+    if not os.path.exists(csv_path):
+        print(f" ! Error: Fișierul CSV nu a fost găsit la: {csv_path}")
+        return fields_list
+
+    with open(csv_path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["entity_name"].strip().lower() == target_entity_name.lower():
+                fields_list.append(
+                    {
+                        "name": row["field_name"].strip(),
+                        "type": row["field_type"].strip(),
+                        "mandatory": row["mandatory"].strip().lower() == "true",
+                        "unique": row["unique"].strip().lower() == "true",
+                    }
+                )
+    return fields_list
+
+
+def gen_entity_mechanic_from_csv(name, fields_list, traits):
+    table_name = name.upper()
+
+    # Generăm indecșii unici conform standardului Jmix @Table(indexes=...)
+    unique_indexes = []
+    for field in fields_list:
+        if field["unique"]:
+            col_name = field["name"].upper()
+            unique_indexes.append(
+                f'@Index(name = "IDX_{table_name}_UNQ_{col_name}", columnList = "{col_name}", unique = true)'
+            )
+
+    if unique_indexes:
+        indexes_str = ",\n        ".join(unique_indexes)
+        table_annotation = (
+            f'@Table(name = "{table_name}", indexes = {{\n        {indexes_str}\n}})'
+        )
+    else:
+        table_annotation = f'@Table(name = "{table_name}")'
+
+    # Generăm proprietățile, metodele și importurile de trăsături în Java
+    java_traits_fields = ""
+    java_traits_methods = ""
+    # java_traits_import = ""
+    dinamic_imports = set()
+
+    if traits["versioned"]:
+        java_traits_fields += '    @Column(name = "VERSION", nullable = false)\n    @Version\n    private Integer version;\n\n'
+        java_traits_methods += "    public Integer getVersion() {\n        return version;\n    }\n\n    public void setVersion(Integer version) {\n        this.version = version;\n    }\n\n"
+
+    if traits["audit_of_creation"]:
+        java_traits_fields += '    @CreatedBy\n    @Column(name = "CREATED_BY")\n    private String createdBy;\n\n    @CreatedDate\n    @Column(name = "CREATED_DATE")\n    private OffsetDateTime createdDate;\n\n'
+        java_traits_methods += "    public String getCreatedBy() {\n        return createdBy;\n    }\n\n    public void setCreatedBy(String createdBy) {\n        this.createdBy = createdBy;\n    }\n\n"
+        java_traits_methods += "    public OffsetDateTime getCreatedDate() {\n        return createdDate;\n    }\n\n    public void setCreatedDate(OffsetDateTime createdDate) {\n        this.createdDate = createdDate;\n    }\n\n"
+        dinamic_imports.add("import org.springframework.data.annotation.CreatedBy;")
+        dinamic_imports.add("import org.springframework.data.annotation.CreatedDate;")
+        dinamic_imports.add("import java.time.OffsetDateTime;")
+
+    if traits["audit_of_modification"]:
+        java_traits_fields += '    @LastModifiedBy\n    @Column(name = "LAST_MODIFIED_BY")\n    private String lastModifiedBy;\n\n    @LastModifiedDate\n    @Column(name = "LAST_MODIFIED_DATE")\n    private OffsetDateTime lastModifiedDate;\n\n'
+        java_traits_methods += "    public String getLastModifiedBy() {\n        return lastModifiedBy;\n    }\n\n    public void setLastModifiedBy(String lastModifiedBy) {\n        this.lastModifiedBy = lastModifiedBy;\n    }\n\n"
+        java_traits_methods += "    public OffsetDateTime getLastModifiedDate() {\n        return lastModifiedDate;\n    }\n\n    public void setLastModifiedDate(OffsetDateTime lastModifiedDate) {\n        this.lastModifiedDate = lastModifiedDate;\n    }\n\n"
+        dinamic_imports.add(
+            "import org.springframework.data.annotation.LastModifiedBy;"
+        )
+        dinamic_imports.add(
+            "import org.springframework.data.annotation.LastModifiedDate;"
+        )
+        dinamic_imports.add("import java.time.OffsetDateTime;")
+
+    if traits["soft_delete"]:
+        java_traits_fields += '    @DeletedBy\n    @Column(name = "DELETED_BY")\n    private String deletedBy;\n\n    @DeletedDate\n    @Column(name = "DELETED_DATE")\n    private OffsetDateTime deletedDate;\n\n'
+        java_traits_methods += "    public String getDeletedBy() {\n        return deletedBy;\n    }\n\n    public void setDeletedBy(String deletedBy) {\n        this.deletedBy = deletedBy;\n    }\n\n"
+        java_traits_methods += "    public OffsetDateTime getDeletedDate() {\n        return deletedDate;\n    }\n\n    public void setDeletedDate(OffsetDateTime deletedDate) {\n        this.deletedDate = deletedDate;\n    }\n\n"
+        dinamic_imports.add("import io.jmix.core.annotation.DeletedBy;")
+        dinamic_imports.add("import io.jmix.core.annotation.DeletedDate;")
+
+    # Generăm câmpurile de business și colectăm importurile necesare
+    java_business_fields = ""
+    java_business_methods = ""
+    is_first_text = True
+
+    # Folosim un set pentru a colecta importuri unice (previne duplicatele dacă ai mai multe câmpuri de același tip)
+    # business_imports = set()
+
+    for field in fields_list:
+        f_name = field["name"]
+        f_type = field["type"]
+        sql_col_name = f_name.upper()
+
+        # Colectăm tipurile în setul global unic
+        if f_type == "BigDecimal":
+            dinamic_imports.add("import java.math.BigDecimal;")
+        elif f_type == "LocalDate":
+            dinamic_imports.add("import java.time.LocalDate;")
+        elif f_type == "LocalDateTime":
+            dinamic_imports.add("import java.time.LocalDateTime;")
+
+        column_props = f'name = "{sql_col_name}"'
+        if field["mandatory"]:
+            column_props += ", nullable = false"
+
+        instance_name_annotation = ""
+        if f_type.lower() == "string" and is_first_text:
+            instance_name_annotation = "    @InstanceName\n"
+            is_first_text = False
+
+        java_business_fields += f"{instance_name_annotation}    @Column({column_props})\n    private {f_type} {f_name};\n\n"
+
+        # CORECȚIE CAPITALIZARE: Luăm doar prima literă cu upper() și o lipim cu restul string-ului de la poziția 1
+        f_caps = f_name[0].upper() + f_name[1:]
+
+        java_business_methods += f"    public {f_type} get{f_caps}() {{\n        return {f_name};\n    }}\n\n    public void set{f_caps}({f_type} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+    # Transformăm tot setul de importuri unice într-un bloc ordonat alfabetic
+    imports_block = "\n".join(sorted(list(dinamic_imports)))
+    if imports_block:
+        imports_block += "\n"
+
+    # Structura finală a clasei Java
+    java_content = f"""package {COMPANY}.{project_name}.entity;
+
+import io.jmix.core.entity.annotation.JmixGeneratedValue;
+import io.jmix.core.metamodel.annotation.InstanceName;
+import io.jmix.core.metamodel.annotation.JmixEntity;
+import jakarta.persistence.*;
+import java.util.UUID;
+{imports_block}
+@JmixEntity
+{table_annotation}
+@Entity
+public class {name} {{
+
+    @Id
+    @Column(name = "ID", nullable = false)
+    @JmixGeneratedValue
+    private UUID id;
+
+{java_traits_fields}{java_business_fields}    public UUID getId() {{
+        return id;
+    }}
+
+    public void setId(UUID id) {{
+        this.id = id;
+    }}
+
+{java_traits_methods}{java_business_methods}}}
+"""
+
+    # Scriem fisierul direct in structura corecta a proiectului
+    td = PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/entity"
+    if not os.path.exists(td):
+        os.makedirs(td)
+
+    java_path = td + "/" + name + ".java"
+    open(java_path, "w", encoding="utf-8").write(java_content)
+    print("✨ Entity mecanic salvat cu succes in: " + java_path)
+
+
+def gen_liquibase_changelog_from_csv(name, fields_list, traits):
+    timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    table_name = name.upper()
+
+    # 1. Maparea tipurilor din CSV în tipuri SQL recunoscute de Liquibase
+    def map_type(java_type):
+        jt = java_type.lower()
+        if jt in ["string", "text"]:
+            return "VARCHAR(255)"
+        if jt in ["integer", "int"]:
+            return "INT"
+        if jt in ["long"]:
+            return "BIGINT"
+        if jt in ["boolean", "bool"]:
+            return "BOOLEAN"
+        if jt in ["date", "localdate"]:
+            return "date"
+        if jt in ["datetime", "localdatetime", "offsetdatetime"]:
+            return "timestamp with time zone"
+        if jt in ["uuid"]:
+            return "UUID"
+        if jt in ["double"]:
+            return "double precision"
+        if jt in ["bigdecimal"]:
+            return "NUMERIC(19, 2)"
+        return "VARCHAR(255)"
+
+    # 2. Generarea coloanelor de infrastructură (Traits) în funcție de traits.csv
+    xml_traits_columns = '            <column name="ID" type="UUID">\n'
+    xml_traits_columns += f'                <constraints nullable="false" primaryKey="true" primaryKeyName="PK_{table_name}"/>\n'
+    xml_traits_columns += "            </column>\n"
+
+    if traits["versioned"]:
+        xml_traits_columns += '            <column name="VERSION" type="INT">\n                <constraints nullable="false" />\n            </column>\n'
+    if traits["audit_of_creation"]:
+        xml_traits_columns += (
+            '            <column name="CREATED_BY" type="VARCHAR(255)" />\n'
+        )
+        xml_traits_columns += '            <column name="CREATED_DATE" type="timestamp with time zone" />\n'
+    if traits["audit_of_modification"]:
+        xml_traits_columns += (
+            '            <column name="LAST_MODIFIED_BY" type="VARCHAR(255)" />\n'
+        )
+        xml_traits_columns += '            <column name="LAST_MODIFIED_DATE" type="timestamp with time zone" />\n'
+    if traits["soft_delete"]:
+        xml_traits_columns += (
+            '            <column name="DELETED_BY" type="VARCHAR(255)" />\n'
+        )
+        xml_traits_columns += '            <column name="DELETED_DATE" type="timestamp with time zone" />\n'
+
+    # 3. Generarea coloanelor de business și colectarea structurii de indecși unici
+    xml_business_columns = ""
+    xml_indexes = ""
+
+    for field in fields_list:
+        sql_col_name = field["name"].upper()
+        sql_type = map_type(field["type"])
+
+        # Constrângeri la nivel de coloană (ex: nullable)
+        constraints = ""
+        if field["mandatory"]:
+            constraints = '                <constraints nullable="false" />\n'
+
+        if constraints:
+            xml_business_columns += f'            <column name="{sql_col_name}" type="{sql_type}">\n{constraints}            </column>\n'
+        else:
+            xml_business_columns += (
+                f'            <column name="{sql_col_name}" type="{sql_type}" />\n'
+            )
+
+        # Dacă în CSV câmpul este marcat ca UNIQUE, generăm un element <createIndex> separat
+        # (Așa cum EclipseLink generează separat pe baza @Index)
+        if field["unique"]:
+            index_name = f"IDX_{table_name}_UNQ_{sql_col_name}"
+            xml_indexes += f"""
+    <changeSet id="{timestamp_id}-idx-{field["name"].lower()}" author="Test_jmix">
+        <createIndex tableName="{table_name}" indexName="{index_name}" unique="true">
+            <column name="{sql_col_name}"/>
+        </createIndex>
+    </changeSet>"""
+
+    # 4. Asamblarea structurii XML cu namespace-urile oficiale Jmix/Liquibase
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
+<databaseChangeLog
+	xmlns="http://liquibase.org"
+	xmlns:xsi="http://w3.org"
+	xsi:schemaLocation="http://liquibase.org
+                      http://liquibase.org/dbchangelog-latest.xsd"
+	objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS"
+>
+    <changeSet id="{timestamp_id}-1" author="Test_jmix">
+        <createTable tableName="{table_name}">
+{xml_traits_columns}{xml_business_columns}        </createTable>
+    </changeSet>{xml_indexes}
+</databaseChangeLog>
+"""
+
+    # 5. Salvarea fișierului pe disc în structura de subfoldere cronologice
+    current_year = datetime.now().strftime("%Y")
+    current_month = datetime.now().strftime("%m")
+    target_dir = (
+        PROIECT_PATH
+        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+    )
+    os.makedirs(target_dir, exist_ok=True)
+
+    filename = f"{target_dir}/{timestamp_id}-{name.lower()}.xml"
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(xml_content)
+    print(f" -> Generated Liquibase XML with Constraints & Indexes: {filename}")
+
+
+def gen_list_ui(n, fi):
+    print("Generating List UI Mechanically...")
+    j = (
+        "package " + COMPANY + "." + project_name + ".view." + n.lower() + ";\n"
+        "import " + COMPANY + "." + project_name + ".entity." + n + ";\n"
+        "import " + COMPANY + "." + project_name + ".view.main.MainView;\n"
+        "import com.vaadin.flow.router.Route;\n"
+        "import io.jmix.flowui.view.*;\n\n"
+        '@Route(value="' + n.lower() + 's", layout=MainView.class)\n'
+        '@ViewController(id = "' + n + '.list")\n'
+        '@ViewDescriptor(path = "' + n.lower() + '-list-view.xml")\n'
+        '@LookupComponent("' + n.lower() + 'sDataGrid")\n'
+        '@DialogMode(width = "64em")\n'
+        "public class " + n + "ListView extends StandardListView<" + n + "> {}"
+    )
+    cols = ""
+    for name, _ in get_fields(fi):
+        cols += '                <column property="' + name + '"/>\n'
+
+    x = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+        '<view xmlns="http://jmix.io/schema/flowui/view"\n'
+        '      title="msg://' + n.lower() + 'ListView.title"\n'
+        '      focusComponent="' + n.lower() + 'sDataGrid">\n'
+        "    <data>\n"
+        '        <collection id="' + n.lower() + 'sDc"\n'
+        '                    class="'
+        + COMPANY
+        + "."
+        + project_name
+        + ".entity."
+        + n
+        + '">\n'
+        '            <loader id="' + n.lower() + 'sDl" readOnly="true">\n'
+        "                <query>\n"
+        "                    <![CDATA[select e from " + n + " e]]>\n"
+        "                </query>\n"
+        "            </loader>\n"
+        "        </collection>\n"
+        "    </data>\n"
+        "    <facets>\n"
+        '        <dataLoadCoordinator auto="true"/>\n'
+        "        <urlQueryParameters>\n"
+        '            <genericFilter component="genericFilter"/>\n'
+        '            <pagination component="pagination"/>\n'
+        "        </urlQueryParameters>\n"
+        "    </facets>\n"
+        "    <actions>\n"
+        '        <action id="selectAction" type="lookup_select"/>\n'
+        '        <action id="discardAction" type="lookup_discard"/>\n'
+        "    </actions>\n"
+        "    <layout>\n"
+        '        <genericFilter id="genericFilter"\n'
+        '               dataLoader="' + n.lower() + 'sDl">\n'
+        '            <properties include=".*"/>\n'
+        "        </genericFilter>\n"
+        '        <hbox id="buttonsPanel" classNames="buttons-panel">\n'
+        "            <startSlot>\n"
+        '                <button id="createButton" action="'
+        + n.lower()
+        + 'sDataGrid.createAction"/>\n'
+        '                <button id="editButton" action="'
+        + n.lower()
+        + 'sDataGrid.editAction"/>\n'
+        '                <button id="removeButton" action="'
+        + n.lower()
+        + 'sDataGrid.removeAction"/>\n'
+        "            </startSlot>\n"
+        "            <endSlot>\n"
+        '                <simplePagination id="pagination" dataLoader="'
+        + n.lower()
+        + 'sDl"/>\n'
+        "            </endSlot>\n"
+        "        </hbox>\n"
+        '        <dataGrid id="' + n.lower() + 'sDataGrid"\n'
+        '                  width="100%"\n'
+        '                  minHeight="20em"\n'
+        '                  dataContainer="' + n.lower() + 'sDc"\n'
+        '                  columnReorderingAllowed="true">\n'
+        "            <actions>\n"
+        '                <action id="createAction" type="list_create"/>\n'
+        '                <action id="editAction" type="list_edit"/>\n'
+        '                <action id="removeAction" type="list_remove"/>\n'
+        "            </actions>\n"
+        '            <columns  resizable="true">\n' + cols + "            </columns>\n"
+        "        </dataGrid>\n"
+        '        <hbox id="lookupActions" visible="false">\n'
+        '            <button id="selectButton" action="selectAction"/>\n'
+        '            <button id="discardButton" action="discardAction"/>\n'
+        "        </hbox>\n"
+        "    </layout>\n"
+        "</view>\n"
+    )
+
+    jd = (
+        PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/view/" + n.lower()
+    )
+    xd = (
+        PROIECT_PATH
+        + f"/src/main/resources/{company_path}/{project_name}/view/"
+        + n.lower()
+    )
+
+    if not os.path.exists(jd):
+        os.makedirs(jd)
+    if not os.path.exists(xd):
+        os.makedirs(xd)
+
+    open(jd + "/" + n + "ListView.java", "w", encoding="utf-8").write(j)
+    open(xd + "/" + n.lower() + "-list-view.xml", "w", encoding="utf-8").write(x)
+    print("✨ List View mecanic salvat!")
+
+
+def gen_detail_ui(n, fi):
+    print("Generating Detail UI Mechanically...")
+
+    # 1. Controller Java pentru ecranul de Detaliu
+    j = (
+        "package " + COMPANY + "." + project_name + ".view." + n.lower() + ";\n\n"
+        "import " + COMPANY + "." + project_name + ".entity." + n + ";\n"
+        "import " + COMPANY + "." + project_name + ".view.main.MainView;\n"
+        "import com.vaadin.flow.router.Route;\n"
+        "import io.jmix.flowui.view.*;\n\n"
+        '@Route(value="' + n.lower() + 's/:id", layout=MainView.class)\n'
+        '@ViewController(id = "' + n + '.detail")\n'
+        '@ViewDescriptor(path = "' + n.lower() + '-detail-view.xml")\n'
+        '@EditedEntityContainer("' + n.lower() + 'Dc")\n'
+        "public class " + n + "DetailView extends StandardDetailView<" + n + "> {}"
+    )
+
+    # 2. Maparea mecanica a campurilor din formular in functie de tipul Java
+    flds = ""
+    for name, t in get_fields(fi):
+        if t == "LocalDate":
+            flds += (
+                '            <datePicker id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '"/>\n'
+            )
+        elif t == "Boolean":
+            flds += (
+                '            <checkbox id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '"/>\n'
+            )
+        elif t == "BigDecimal":
+            flds += (
+                '            <textField id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '" width="100%" datatype="decimal"/>\n'
+            )
+        elif t == "Integer":
+            flds += (
+                '            <textField id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '" width="100%" datatype="int"/>\n'
+            )
+        elif t == "Long":
+            flds += (
+                '            <textField id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '" width="100%" datatype="long"/>\n'
+            )
+        elif t == "Double":
+            flds += (
+                '            <textField id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '" width="100%" datatype="double"/>\n'
+            )
+        else:
+            flds += (
+                '            <textField id="'
+                + name
+                + 'Field" property="'
+                + name
+                + '" width="100%"/>\n'
+            )
+
+    # 3. Structura XML nativa conform Jmix Studio
+    x = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+        '<view xmlns="http://jmix.io/schema/flowui/view"\n'
+        '      title="msg://' + n.lower() + 'DetailView.title">\n'
+        "    <data>\n"
+        '        <instance id="' + n.lower() + 'Dc"\n'
+        '                    class="'
+        + COMPANY
+        + "."
+        + project_name
+        + ".entity."
+        + n
+        + '">\n'
+        '            <fetchPlan extends="_base"/>\n'
+        '            <loader id="' + n.lower() + 'Dl"/>\n'
+        "        </instance>\n"
+        "    </data>\n"
+        "    <facets>\n"
+        '        <dataLoadCoordinator auto="true"/>\n'
+        "    </facets>\n"
+        "    <actions>\n"
+        '        <action id="saveAction" type="detail_saveClose"/>\n'
+        '        <action id="closeAction" type="detail_close"/>\n'
+        "    </actions>\n"
+        '    <layout expand="form" spacing="true">\n'
+        '        <formLayout id="form" dataContainer="' + n.lower() + 'Dc">\n'
+        "            <responsiveSteps>\n"
+        '                <responsiveStep minWidth="0" columns="1"/>\n'
+        '                <responsiveStep minWidth="40em" columns="2"/>\n'
+        "            </responsiveSteps>\n" + flds + "        </formLayout>\n"
+        '        <hbox id="detailActions" classNames="buttons-panel">\n'
+        '            <button id="saveAndCloseButton" action="saveAction"/>\n'
+        '            <button id="closeButton" action="closeAction"/>\n'
+        "        </hbox>\n"
+        "    </layout>\n"
+        "</view>\n"
+    )
+
+    jd = (
+        PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/view/" + n.lower()
+    )
+    xd = (
+        PROIECT_PATH
+        + f"/src/main/resources/{company_path}/{project_name}/view/"
+        + n.lower()
+    )
+
+    if not os.path.exists(jd):
+        os.makedirs(jd)
+    if not os.path.exists(xd):
+        os.makedirs(xd)
+
+    open(jd + "/" + n + "DetailView.java", "w", encoding="utf-8").write(j)
+    open(xd + "/" + n.lower() + "-detail-view.xml", "w", encoding="utf-8").write(x)
+    print("✨ Detail View mecanic salvat!")
+
+
+def update_messages_entity(n, fi):
+    print("Generating localization messages for " + n + "...")
+    fields_list = get_fields(fi)
+
+    # Definim calea catre cele doua fisiere din proiectul tau Gradle
+    base_path = PROIECT_PATH + f"/src/main/resources/{company_path}/{project_name}"
+    en_path = base_path + "/messages_en.properties"
+    ro_path = base_path + "/messages_ro.properties"
+
+    # 1. Pregatim traducerile pentru limba Engleza (Mecanic)
+    en_lines = []
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Version")
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Created by")
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Created date")
+    en_lines.append(
+        f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Last modified by"
+    )
+    en_lines.append(
+        f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Last modified date"
+    )
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Deleted by")
+    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Deleted date")
+
+    for f_name, _ in fields_list:
+        # Transforma camelCase in text separat (ex: creditLimit -> Credit limit)
+        spaced_name = re.sub(r"(?<!^)(?=[A-Z])", " ", f_name).lower()
+        readable_en = spaced_name[0].upper() + spaced_name[1:]
+        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
+
+    # Adaugam si titlurile pentru ecranele UI generate anterior
+    en_lines.append(
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={n}s"
+    )
+    en_lines.append(
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={n} detail"
+    )
+
+    # 2. Pregatim traducerile pentru limba Romana (Folosind AI-ul tau local din Ollama pentru traducere)
+    ro_lines = []
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Versiune")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Creat de")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data crearii")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Modificat de")
+    ro_lines.append(
+        f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificarii"
+    )
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Sters de")
+    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data stergerii")
+
+    for f_name, _ in fields_list:
+        spaced_name = re.sub(r"(?<!^)(?=[A-Z])", " ", f_name).lower()
+        # Cerem modelului de 3B sa traduca doar numele campului curent
+        prompt = f"Translate the following English technical field name to Romanian. Output ONLY the translated name, capitalized, nothing else. Text: '{spaced_name}'"
+        traducere_ro = (
+            requests.post(
+                "http://localhost:11434/api/generate",
+                json={"model": "qwen2.5-coder:3b", "prompt": prompt, "stream": False},
+            )
+            .json()
+            .get("response", "")
+            .strip()
+        )
+        # Plasa de siguranta in caz de lipsa serviciu
+        if not traducere_ro or "Error" in traducere_ro:
+            traducere_ro = spaced_name.capitalize()
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
+
+    ro_lines.append(
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title=Lista {n}"
+    )
+    ro_lines.append(
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title=Detalii {n}"
+    )
+
+    # 3. Functie interna sigura care scrie in fisier fara sa duplice liniile existente
+    def append_unique(file_path, lines_to_add):
+        existing_content = ""
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                existing_content = f.read()
+
+        with open(file_path, "a", encoding="utf-8") as f:
+            # Daca fisierul nu se termina cu newline, adaugam unul ca sa nu lipim prima linie noua de textul vechi
+            if existing_content and not existing_content.endswith("\n"):
+                f.write("\n")
+            for line in lines_to_add:
+                key = line.split("=")[0]
+                if key not in existing_content:
+                    f.write(line + "\n")
+
+    append_unique(en_path, en_lines)
+    append_unique(ro_path, ro_lines)
+    print(
+        "✨ Localizarea in engleza si romana pentru entitatea "
+        + n
+        + " a fost injectata cu succes!"
+    )
+
+
+def update_menu(n):
+    print("Updating menu.xml for " + n + "...")
+    menu_path = (
+        PROIECT_PATH + f"/src/main/resources/{company_path}/{project_name}/menu.xml"
+    )
+
+    if not os.path.exists(menu_path):
+        print("⚠️ Nu am gasit fisierul menu.xml la calea specificata!")
+        return
+
+    # Generam linia exacta de meniu in formatul Jmix Studio
+    menu_item = f'    <item view="{n}.list" title="msg://{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title"/>\n'
+
+    with open(menu_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Plasa de siguranta: verificam daca ecranul este deja in meniu
+    if ('view="' + n + '.list"') in content:
+        print("ℹ️ Ecranul " + n + ".list exista deja in meniu.")
+        return
+
+    # Inseram item-ul exact inainte de inchiderea tag-ului principal de meniu
+    if "</menu>" in content:
+        new_content = content.replace("</menu>", menu_item + "</menu>")
+        with open(menu_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        print("Menu injectat cu succes in menu.xml!")
+    else:
+        print("⚠️ Structura invalida pentru menu.xml (lipsete tag-ul </menu>)!")
+
+
+if __name__ == "__main__":
+    # Verificăm corect numărul minim de argumente (script + acțiune + nume entitate)
+    if len(sys.argv) < 3:
+        print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
+        sys.exit(1)
+
+    action = sys.argv[1]  # Ex: entity
+    name = sys.argv[2]  # Ex: Department
+
+    if action == "entity":
+        # Preluăm datele normalizate din cele 2 fișiere CSV din rădăcină
+        traits = get_traits_from_csv("traits.csv", name)
+        fields_list = get_entities_from_csv("entities.csv", name)
+
+        if not fields_list:
+            print(f" ! Nu s-au găsit câmpuri pentru entitatea '{name}' în entities.csv")
+            sys.exit(1)
+
+        print(f"Generating Entity {name} from CSV architecture...")
+        gen_entity_mechanic_from_csv(name, fields_list, traits)
+        gen_liquibase_changelog_from_csv(name, fields_list, traits)
+
+    # elif action == "ui-list":
+    #     gen_list_ui(name, fields_list)
+    #     update_menu(name)
+    # elif action == "ui-detail":
+    #     gen_detail_ui(name, fields_list)
+    else:
+        print(
+            f" ! Acțiune necunoscută: '{action}'. Folosește entity, ui-list sau ui-detail."
+        )
+        sys.exit(1)
