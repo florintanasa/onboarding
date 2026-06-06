@@ -2,11 +2,6 @@ entity_name,field_name,field_type,mandatory,unique
 Department,name,String,true,false
 Step,name,String,true,true
 Step,duration,Integer,true,false
-User_,username,String,true,true
-User_,password,String,true,false
-User_,firstName,String,false,false
-User_,lastName,String,false,false
-User_,email,String,true,true
 UserStep,dueDate,LocalDate,true,false
 UserStep,completedDate,LocalDate,false,false
 UserStep,sortOrder,Integer,false,false
