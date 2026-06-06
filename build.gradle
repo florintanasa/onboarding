@@ -35,6 +35,8 @@ dependencies {
     implementation 'io.jmix.datatools:jmix-datatools-flowui-starter'
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // For Romanian translations - https://docs.jmix.io/jmix/localization/framework-translations.html
+    implementation 'io.jmix.translations:jmix-translations-ro'
 
     runtimeOnly 'org.hsqldb:hsqldb'
 
