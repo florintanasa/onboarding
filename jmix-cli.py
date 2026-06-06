@@ -388,7 +388,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
         if field["unique"]:
             index_name = f"IDX_{table_name}_UNQ_{sql_col_name}"
             xml_indexes += f"""
-    <changeSet id="{timestamp_id}-idx-{field["name"].lower()}" author="Test_jmix">
+    <changeSet id="{timestamp_id}-idx-{field["name"].lower()}" author="{project_name}">
         <createIndex tableName="{table_name}" indexName="{index_name}" unique="true">
             <column name="{sql_col_name}"/>
         </createIndex>
@@ -403,7 +403,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd"
 	objectQuotingStrategy="QUOTE_ONLY_RESERVED_WORDS"
 >
-    <changeSet id="{timestamp_id}-1" author="Test_jmix">
+    <changeSet id="{timestamp_id}-1" author="{project_name}">
         <createTable tableName="{table_name}">
 {xml_traits_columns}{xml_business_columns}        </createTable>
     </changeSet>{xml_indexes}
@@ -468,7 +468,7 @@ def gen_liquibase_relations_changelog(name, relations_list):
             nullable_val = "false" if rel["mandatory"] else "true"
 
             xml_fk_content += f"""
-    <changeSet id="{timestamp_id}-add-fk-{rel["field"].lower()}" author="Test_jmix">
+    <changeSet id="{timestamp_id}-add-fk-{rel["field"].lower()}" author="{project_name}">
         <addColumn tableName="{src_table}">
             <column name="{col_name}" type="UUID">
                 <constraints nullable="{nullable_val}"/>
@@ -490,7 +490,7 @@ def gen_liquibase_relations_changelog(name, relations_list):
             nullable_val = "false" if rel["mandatory"] else "true"
 
             xml_fk_content += f"""
-    <changeSet id="{timestamp_id}-add-11-{rel["field"].lower()}" author="Test_jmix">
+    <changeSet id="{timestamp_id}-add-11-{rel["field"].lower()}" author="{project_name}">
         <addColumn tableName="{src_table}">
             <column name="{col_name}" type="UUID">
                 <constraints nullable="{nullable_val}"/>
@@ -515,7 +515,7 @@ def gen_liquibase_relations_changelog(name, relations_list):
             tgt_fk = f"{tgt_table}_ID"
 
             xml_fk_content += f"""
-    <changeSet id="{timestamp_id}-create-nn-{join_table.lower()}" author="Test_jmix">
+    <changeSet id="{timestamp_id}-create-nn-{join_table.lower()}" author="{project_name}">
         <createTable tableName="{join_table}">
             <column name="{src_fk}" type="UUID">
                 <constraints nullable="false"/>
@@ -602,7 +602,9 @@ def gen_list_view_from_csv(name, fields_list, relations_list=[]):
         <collection id="{lower_name}sDc" class="{COMPANY}.{project_name}.entity.{name}">
 {xml_fetch_plan_block}
             <loader id="{lower_name}sDl" readOnly="true">
-                <query>[![CDATA[select e from {name} e]]</query>
+                <query>
+                	<![CDATA[select e from {name} e]]>
+                </query>
             </loader>
         </collection>
     </data>
@@ -696,7 +698,11 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
             xml_relation_data_containers += (
                 f'            <loader id="{tgt_lower}sDl">\n'
             )
-            xml_relation_data_containers += f"                <query>[![CDATA[select e from {tgt_class} e]]</query>\n"
+            xml_relation_data_containers += "                <query>"
+            xml_relation_data_containers += (
+                f"                   <![CDATA[select e from {tgt_class} e]]>"
+            )
+            xml_relation_data_containers += "                </query>\n"
             xml_relation_data_containers += "            </loader>\n"
             xml_relation_data_containers += "        </collection>\n"
 
@@ -718,6 +724,10 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
     <facets>
         <dataLoadCoordinator auto="true"/>
     </facets>
+    <actions>
+        <action id="saveAction" type="detail_saveClose"/>
+        <action id="closeAction" type="detail_close"/>
+    </actions>
     <layout classNames="fluid-layout" width="100%">
         <formLayout id="form" dataContainer="{lower_name}Dc">
 {xml_form_components}        </formLayout>
