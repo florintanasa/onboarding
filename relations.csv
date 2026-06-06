@@ -1,6 +1,6 @@
 source_entity,relation_type,target_entity,field_name,mandatory
-User_,N:1,Department,department,false
+User,N:1,Department,department,false
+User,1:N,UserStep,steps,false
+User,N:1,OnboardingStatus,onboardingStatus,false
 UserStep,N:1,Step,step,true
 UserStep,N:1,User_,user,true
-User_,1:N,UserStep,steps,false
-User_,N:1,OnboardingStatus,onboardingStatus,false
