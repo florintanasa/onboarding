@@ -987,7 +987,7 @@ def update_menu(n):
     )
 
     if not os.path.exists(menu_path):
-        print("⚠️ Nu am gasit fisierul menu.xml la calea specificata!")
+        print(f"⚠️ I not found the file menu.xml in the path {menu_path}!")
         return
 
     # Generate the exact menu line in the Jmix Studio format
@@ -998,7 +998,7 @@ def update_menu(n):
 
     # For safety: check if the screen is already in the menu
     if ('view="' + n + '.list"') in content:
-        print("ℹ️ Ecranul " + n + ".list exista deja in meniu.")
+        print("ℹ️ View " + n + ".list allready exist in menu.")
         return
 
     # Insert the exact item right before the closing tag of the main menu
@@ -1027,7 +1027,7 @@ if __name__ == "__main__":
         relations_list = get_relations_from_csv("relations.csv", name)
 
         if not fields_list:
-            print(f" ! No fields found for the entity {name} in entities.csv")
+            print(f" ⚠ No fields found for the entity {name} in entities.csv")
             sys.exit(1)
 
         print(f"Generating Entity {name} from CSV architecture...")
@@ -1041,7 +1041,7 @@ if __name__ == "__main__":
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
         if not fields_list:
-            print(f" ! Error: Fields for entity {name} do not exist in entities.csv")
+            print(f" ⚠ Error: Fields for entity {name} do not exist in entities.csv")
             sys.exit(1)
         gen_list_view_from_csv(name, fields_list, relations_list)
         update_menu(name)
@@ -1050,10 +1050,10 @@ if __name__ == "__main__":
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
         if not fields_list:
-            print(f" ! Error: Fields for {name} do not exist in entities.csv")
+            print(f" ⚠ Error: Fields for {name} do not exist in entities.csv")
             sys.exit(1)
         gen_detail_view_from_csv(name, fields_list, relations_list)
 
     else:
-        print(f" ! Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
+        print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
         sys.exit(1)
