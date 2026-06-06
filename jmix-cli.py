@@ -1,3 +1,30 @@
+#!/usr/bin/env python3
+# -
+# Copyright (c) 2026 Florin Tanasă <florin.tanasa@gmail.com>
+#
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# -
+#
 import csv
 import os
 import re
@@ -7,42 +34,51 @@ from pathlib import Path
 
 import requests
 
+# Load proiect path in variable PROIECT_PATH
 PROIECT_PATH = str(Path.cwd())
 
 
+# Function to read the the file settings.gradle file to find and return project name
 def get_project_name(settings_path: Path = Path("settings.gradle")) -> str | None:
     text = settings_path.read_text(encoding="utf-8")
-    # caută rootProject.name = 'name' sau "name"
+    # Find rootProject.name = 'name' or "name"
     m = re.search(r"""rootProject\.name\s*=\s*(['"])(.*?)\1""", text)
-    return m.group(2) if m else None
+    return m.group(2) if m else None  # return only proiect name - like 'onboarding'
 
 
+# Load in variable PROJECT the name of project
 PROJECT = get_project_name()
-project_name = (PROJECT or "").lower()
+project_name = (PROJECT or "").lower()  # transform project name in lower letters
 
 
+# Function to read the the file settings.gradle file to find and return project name
 def get_company_name(settings_path: Path = Path("build.gradle")) -> str | None:
     text = settings_path.read_text(encoding="utf-8")
-    # caută group = 'com.company' sau "com.company"
+    # Find group = 'com.company' or "com.company"
     m = re.search(r"""group\s*=\s*(['"])(.*?)\1""", text)
-    return m.group(2) if m else None
+    return m.group(2) if m else None  # return only company name - like 'com.company'
 
 
+# Load in variable COMPANY the name of group
 COMPANY = get_company_name() or ""
+# Replace char '.' with '/' and transf. in path - like 'com/company'
 company_path = COMPANY.replace(".", "/")
 
 
+# Function to read traits from csv file traits.casv
 def get_traits_from_csv(csv_path, target_entity_name):
-    """Citește traits.csv și returnează trăsăturile globale ale entității."""
+    """Reading traits.csv file and return global traits of entitties."""
     traits = {
         "versioned": True,
         "audit_of_creation": True,
         "audit_of_modification": True,
         "soft_delete": False,
     }
+    # If not is found the traits.csv return traits default: "versioned": True,"audit_of_creation": True, "audit_of_modification": True, "soft_delete": False,
     if not os.path.exists(csv_path):
         return traits
 
+    # Open the traits.csv fiele and return the traits for entity
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -59,11 +95,12 @@ def get_traits_from_csv(csv_path, target_entity_name):
     return traits
 
 
+# Funtion to return global fields of entity
 def get_entities_from_csv(csv_path, target_entity_name):
-    """Citește entities.csv și extrage doar câmpurile de business ale entității."""
+    """Reading entities.csv file and return global fields of entity."""
     fields_list = []
     if not os.path.exists(csv_path):
-        print(f" ! Error: Fișierul CSV nu a fost găsit la: {csv_path}")
+        print(f" ! Error: The file CSV was not found at : {csv_path}")
         return fields_list
 
     with open(csv_path, mode="r", encoding="utf-8") as f:
@@ -81,10 +118,11 @@ def get_entities_from_csv(csv_path, target_entity_name):
     return fields_list
 
 
+# Function to generate java class for an entity with fileds loaded in fields_list, traits and relations from the entities
 def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
-    table_name = name.upper()
+    table_name = name.upper()  # tranform table name in upper chars
 
-    # Generăm indecșii unici conform standardului Jmix @Table(indexes=...)
+    # Generate unique indexes conform Jmix standard  @Table(indexes=...)
     unique_indexes = []
     for field in fields_list:
         if field["unique"]:
@@ -101,7 +139,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
     else:
         table_annotation = f'@Table(name = "{table_name}")'
 
-    # Generăm proprietățile, metodele și importurile de trăsături în Java
+    # Generate the properties, methods, and trait imports in Java
     java_traits_fields = ""
     java_traits_methods = ""
     dinamic_imports = set()
@@ -169,17 +207,18 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
         f_caps = f_name[0].upper() + f_name[1:]
         java_business_methods += f"    public {f_type} get{f_caps}() {{\n        return {f_name};\n    }}\n\n    public void set{f_caps}({f_type} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
 
-    # Generăm câmpurile și metodele pentru relații
+    # Generate fields and methods for relationships
     java_relation_fields = ""
     java_relation_methods = ""
 
     for rel in relations_list:
+        # For the ManyToOne (N:1) relationship case
         if rel["type"] == "N:1":
             f_name = rel["field"]
             tgt_class = rel["target"]
             sql_fk_col = f"{f_name.upper()}_ID"
 
-            # Adăugăm importurile în setul global unic (Aici se colectau corect, dar se transformau prea devreme)
+            # Add imports to the unique global set
             dinamic_imports.add("import jakarta.persistence.FetchType;")
             dinamic_imports.add("import jakarta.persistence.ManyToOne;")
             dinamic_imports.add("import jakarta.persistence.JoinColumn;")
@@ -196,30 +235,32 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
             java_relation_methods += f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
             java_relation_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
 
+        # For the OneToMany (1:N) relationship case
         elif rel["type"] == "1:N":
             f_name = rel["field"]  # ex: steps
             tgt_class = rel["target"]  # ex: UserStep
 
-            # Determinăm automat numele câmpului invers (mappedBy) din entitatea țintă.
-            # Jmix folosește numele clasei sursă cu literă mică la început.
-            # Dacă clasa sursă are underscore (User_), îl eliminăm pentru a respecta proprietatea Java.
+            # Automatically determine the mappedBy field name from the target entity.
+            # Jmix uses the lowercase version of the source class name.
+            # If the source class has an underscore (User_), we remove it to comply with the Java convention.
             mapped_by_field = name[0].lower() + name[1:]
             if mapped_by_field.endswith("_"):
-                mapped_by_field = mapped_by_field[:-1]  # ex: devine "user"
+                mapped_by_field = mapped_by_field[:-1]  # ex: becomes "user"
 
-            # Adăugăm importurile necesare în setul global dinamic
+            # Add the necessary imports to the dynamic global set
             dinamic_imports.add("import jakarta.persistence.OneToMany;")
             dinamic_imports.add("import java.util.List;")
 
-            # 1. Proprietatea de tip Listă (List<UserStep>)
+            # 1. List<UserStep> property
             java_relation_fields += f'    @OneToMany(mappedBy = "{mapped_by_field}")\n'
             java_relation_fields += f"    private List<{tgt_class}> {f_name};\n\n"
 
-            # 2. Metodele Getter și Setter specifice colecției
+            # 2. Getter and Setter methods specific for the collection
             f_caps = f_name[0].upper() + f_name[1:]
             java_relation_methods += f"    public List<{tgt_class}> get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
             java_relation_methods += f"    public void set{f_caps}(List<{tgt_class}> {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
 
+        # For the OneToOne (1:1) relationship case
         elif rel["type"] == "1:1":
             f_name = rel["field"]
             tgt_class = rel["target"]
@@ -241,6 +282,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
             java_relation_methods += f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
             java_relation_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
 
+        # For the ManyToMany (N:N) relationship case
         elif rel["type"] == "N:N":
             f_name = rel["field"]
             tgt_class = rel["target"]
@@ -268,12 +310,12 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
             java_relation_methods += f"    public List<{tgt_class}> get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
             java_relation_methods += f"    public void set{f_caps}(List<{tgt_class}> {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
 
-    # CORECȚIE SECVENȚIALITATE: Transformăm tot setul de importuri în text abia ACUM, după ce s-a strâns totul!
+    # Transform the entire import set into text NOW, after everything is collected
     imports_block = "\n".join(sorted(list(dinamic_imports)))
     if imports_block:
         imports_block += "\n"
 
-    # Structura finală a clasei Java
+    # ======== Final Java class structure ========
     java_content = f"""package {COMPANY}.{project_name}.entity;
 
 import io.jmix.core.entity.annotation.JmixGeneratedValue;
@@ -303,7 +345,7 @@ public class {name} {{
 {java_traits_methods}{java_business_methods}{java_relation_methods}}}
 """
 
-    # Scriem fisierul direct in structura corecta a proiectului
+    # Write the file directly into the correct project structure
     td = PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/entity"
     if not os.path.exists(td):
         os.makedirs(td)
@@ -317,7 +359,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
     timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
     table_name = name.upper()
 
-    # 1. Maparea tipurilor din CSV în tipuri SQL recunoscute de Liquibase
+    # 1. Map CSV data types to SQL data types recognized by Liquibase
     def map_type(java_type):
         jt = java_type.lower()
         if jt in ["string", "text"]:
@@ -340,7 +382,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
             return "NUMERIC(19, 2)"
         return "VARCHAR(255)"
 
-    # 2. Generarea coloanelor de infrastructură (Traits) în funcție de traits.csv
+    # 2. Generate infrastructure columns (Traits) based on traits.csv
     xml_traits_columns = '            <column name="ID" type="UUID">\n'
     xml_traits_columns += f'                <constraints nullable="false" primaryKey="true" primaryKeyName="PK_{table_name}"/>\n'
     xml_traits_columns += "            </column>\n"
@@ -363,7 +405,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
         )
         xml_traits_columns += '            <column name="DELETED_DATE" type="timestamp with time zone" />\n'
 
-    # 3. Generarea coloanelor de business și colectarea structurii de indecși unici
+    # 3. Generate business columns and collect unique index structure
     xml_business_columns = ""
     xml_indexes = ""
 
@@ -383,8 +425,8 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
                 f'            <column name="{sql_col_name}" type="{sql_type}" />\n'
             )
 
-        # Dacă în CSV câmpul este marcat ca UNIQUE, generăm un element <createIndex> separat
-        # (Așa cum EclipseLink generează separat pe baza @Index)
+        # If the field in CSV is marked as UNIQUE, generate a separate <createIndex> element
+        # (Just like EclipseLink generates separately based on @Index)
         if field["unique"]:
             index_name = f"IDX_{table_name}_UNQ_{sql_col_name}"
             xml_indexes += f"""
@@ -394,7 +436,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
         </createIndex>
     </changeSet>"""
 
-    # 4. Asamblarea structurii XML cu namespace-urile oficiale Jmix/Liquibase
+    # 4. Assemble the XML structure with Jmix/Liquibase official namespaces
     xml_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
 <databaseChangeLog
 	xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
@@ -410,7 +452,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
 </databaseChangeLog>
 """
 
-    # 5. Salvarea fișierului pe disc în structura de subfoldere cronologice
+    # 5. Save the file on disk in a chronological subfolder structure
     current_year = datetime.now().strftime("%Y")
     current_month = datetime.now().strftime("%m")
     target_dir = (
@@ -447,25 +489,32 @@ def get_relations_from_csv(csv_path, target_entity_name):
     return relations_list
 
 
+# Function to generate Liquibase relationships
 def gen_liquibase_relations_changelog(name, relations_list):
     if not relations_list:
         return
 
-    timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
-    src_table = name.upper()
+    timestamp_id = datetime.now().strftime(
+        "%Y%m%d%H%M%S"
+    )  # Generate a timestamp string in YYYYMMDDHHMMSS format
+    src_table = name.upper()  # Convert the input 'name' to uppercase
 
-    xml_fk_content = ""
-    for rel in relations_list:
-        tgt_table = rel["target"].upper()
-        # EXCEPȚIA JMIX: Dacă ținta este clasa User, tabela SQL reală este USER_
+    xml_fk_content = (
+        ""  # Initialize an empty string to store the XML content for foreign keys
+    )
+    for rel in relations_list:  # Iterate through the list of relationships
+        tgt_table = rel["target"].upper()  # Convert the target table name to uppercase
+        # EXCEPTION FOR JMIX: If the target is the "USER" class, the actual SQL table is USER_
         if tgt_table == "USER":
-            tgt_table = "USER_"
-        # === CAZUL 1: Relație N:1 (ManyToOne) ===
-        if rel["type"] == "N:1":
+            tgt_table = "USER_"  # Adjust the table name to "USER_"
+        # === CASE 1: N:1 Relationship (ManyToOne) ===
+        if rel["type"] == "N:1":  # If the relationship type is N:1
             f_name = rel["field"].upper()
             col_name = f"{f_name}_ID"
             fk_name = f"FK_{src_table}_ON_{f_name}"
-            nullable_val = "false" if rel["mandatory"] else "true"
+            nullable_val = (
+                "false" if rel["mandatory"] else "true"
+            )  # Set the nullable value based on whether the field is mandatory
 
             xml_fk_content += f"""
     <changeSet id="{timestamp_id}-add-fk-{rel["field"].lower()}" author="{project_name}">
@@ -481,8 +530,8 @@ def gen_liquibase_relations_changelog(name, relations_list):
                                   referencedColumnNames="ID"/>
     </changeSet>"""
 
-        # === CAZUL 2: Relație 1:1 (OneToOne) ===
-        # Adaugă o coloană UUID + Foreign Key + o constrângere UNIQUE pentru a asigura legătura de 1-la-1
+        # === CASE 2: 1:1 Relationship (OneToOne) ===
+        # Add a UUID column + Foreign Key + a UNIQUE constraint to ensure the 1-to-1 link
         elif rel["type"] == "1:1":
             f_name = rel["field"].upper()
             col_name = f"{f_name}_ID"
@@ -507,8 +556,8 @@ def gen_liquibase_relations_changelog(name, relations_list):
                                   referencedColumnNames="ID"/>
     </changeSet>"""
 
-        # === CAZUL 3: Relație N:N (ManyToMany) ===
-        # NU adaugă coloane în tabelele existente, ci creează o tabelă complet nouă de legătură (Join Table)
+        # === CASE 3: N:N Relationship (ManyToMany) ===
+        # DO NOT add columns in existing tables, but create a completely new linking table
         elif rel["type"] == "N:N":
             join_table = f"{src_table}_{tgt_table}_LINK"
             src_fk = f"{src_table}_ID"
@@ -562,37 +611,41 @@ def gen_liquibase_relations_changelog(name, relations_list):
     print(f" -> Generated Liquibase Relations XML: {filename}")
 
 
+# Function to generate the list-view screen
 def gen_list_view_from_csv(name, fields_list, relations_list=[]):
-    lower_name = name.lower()
+    lower_name = name.lower()  # Convert the input 'name' to lowercase
 
     # 1. Generăm coloanele simple din entities.csv
     xml_columns = ""
     for field in fields_list:
-        f_name = field["name"]
-        xml_columns += f'            <column property="{f_name}"/>\n'
+        f_name = field["name"]  # Get the field name from the 'fields_list'
+        xml_columns += f'            <column property="{f_name}"/>\n'  # Add a <column> element with the field name as the property
 
-    # 2. Generăm dinamic planul de extragere (Fetch Plan) și coloanele pentru relații
-    xml_fetch_plan_properties = ""
+    # 2. Dynamically generate the Fetch Plan and columns for relationships
+    xml_fetch_plan_properties = (
+        ""  # Initialize an empty string to store the Fetch Plan block.
+    )
     for rel in relations_list:
         if rel["type"] == "N:1":
             f_name = rel["field"]  # ex: step, user
 
-            # Îi spunem Fetch Plan-ului să încarce și proprietatea de relație cu atributele ei de bază (_base)
+            # Tell the Fetch Plan to load the relationship property with its basic attributes (_base)
             xml_fetch_plan_properties += (
                 f'                <property name="{f_name}" fetchPlan="_base"/>\n'
             )
 
-            # Adăugăm coloana în tabel folosind formatul cu punct (proprietate.numeCâmpInstanță)
-            # În Jmix, dacă pui direct property="step", el va apela automat câmpul marcat cu @InstanceName din acea entitate!
+            # Add the column to the table using the dot notation (property.instanceNameField)
+            # In Jmix, if is directly set property="step", it will automatically call the field marked with @InstanceName from that entity!
             xml_columns += f'            <column property="{f_name}"/>\n'
 
-    # Construim blocul de Fetch Plan doar dacă avem relații definite
+    # Construct the Fetch Plan block only if relationships are defined
     xml_fetch_plan_block = ""
+    # Check if the xml_fetch_plan_properties dictionary is not empty.
     if xml_fetch_plan_properties:
         xml_fetch_plan_block = f"""            <fetchPlan extends="_base">
 {xml_fetch_plan_properties}            </fetchPlan>"""
 
-    # 3. Structura XML FlowUI pentru Listă complet funcțională
+    # 3. XML FlowUI Structure for a Fully Functional List
     xml_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <view xmlns="http://jmix.io/schema/flowui/view"
 	  xmlns:c="http://jmix.io/schema/flowui/jpql-condition"
@@ -630,7 +683,7 @@ def gen_list_view_from_csv(name, fields_list, relations_list=[]):
 </view>
 """
 
-    # 4. Structura Controllerului Java pentru Listă
+    # 4. Java Controller Structure for the list-view
     java_content = f"""package {COMPANY}.{project_name}.view.{lower_name};
 
 import {COMPANY}.{project_name}.entity.{name};
@@ -647,7 +700,7 @@ public class {name}ListView extends StandardListView<{name}> {{
 }}
 """
 
-    # Scrierea fișierelor pe disc
+    # Writing to Disk
     view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
     java_dir = (
         f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
@@ -659,13 +712,14 @@ public class {name}ListView extends StandardListView<{name}> {{
         f.write(xml_content)
     with open(f"{java_dir}/{name}ListView.java", "w", encoding="utf-8") as f:
         f.write(java_content)
-    print(f" 🖥️ List View generat cu succes pentru: {name}")
+    print(f" 🖥️ Successfully generated List View for: {name}")
 
 
+# Function to generate the detail-view screen
 def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
     lower_name = name.lower()
 
-    # 1. Generăm componentele de formular în mod dinamic
+    # 1. Generate the form components dynamically
     xml_form_components = ""
     for field in fields_list:
         f_name = field["name"]
@@ -684,7 +738,7 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
                 f'            <textField id="{f_name}Field" property="{f_name}"/>\n'
             )
 
-    # 2. Adăugăm componenta inteligentă entityComboBox pentru relațiile N:1
+    # 2. Add the intelligent entityComboBox component for N:1 relationships
     xml_relation_data_containers = ""
     for rel in relations_list:
         if rel["type"] == "N:1":
@@ -692,7 +746,7 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
             tgt_class = rel["target"]  # ex: Step, User_
             tgt_lower = tgt_class.lower()
 
-            # Construim un CollectionContainer dinamic pentru a încărca datele din tabela țintă
+            # Build a dynamic CollectionContainer to load data from the target table
             xml_relation_data_containers += f'        <collection id="{tgt_lower}sDc" class="{COMPANY}.{project_name}.entity.{tgt_class}">\n'
             xml_relation_data_containers += '            <fetchPlan extends="_base"/>\n'
             xml_relation_data_containers += (
@@ -706,10 +760,10 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
             xml_relation_data_containers += "            </loader>\n"
             xml_relation_data_containers += "        </collection>\n"
 
-            # Adăugam componenta entityCombobox conectată la itemsContainer
+            # Add the entityCombobox component connected to the itemsContainer
             xml_form_components += f'            <entityComboBox id="{f_name}Field" property="{f_name}" itemsContainer="{tgt_lower}sDc"/>\n'
 
-    # 2. Structura XML FlowUI pentru Detaliu
+    # 2. XML FlowUI Structure for detail-view
     xml_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <view xmlns="http://jmix.io/schema/flowui/view"
       title="msg://{lower_name}DetailView.title"
@@ -739,7 +793,7 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
 </view>
 """
 
-    # 3. Structura Controllerului Java pentru Detaliu
+    # 3. Java Controller Structure for detail-view
     java_content = f"""package {COMPANY}.{project_name}.view.{lower_name};
 
 import {COMPANY}.{project_name}.entity.{name};
@@ -766,7 +820,7 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
         f.write(xml_content)
     with open(f"{java_dir}/{name}DetailView.java", "w", encoding="utf-8") as f:
         f.write(java_content)
-    print(f" 🖥️ Detail View generat cu succes pentru: {name}")
+    print(f" 🖥️ Detail View successfully generated for: {name}")
 
 
 def update_messages_entity(n, fields_list, traits, relations_list=[]):
@@ -813,16 +867,16 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
             f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data stergerii"
         )
 
-    # 1. GENERAREA ȘI TRADUCEREA CÂMPURILOR DE BUSINESS (entities.csv)
+    # 1. GENERATE AND TRANSLATE BUSINESS FIELDS (entities.csv)
     for field in fields_list:
         f_name = field["name"]
 
-        # LOGICĂ SIGURĂ ÎN LOC DE REGEX: Separă camelCase cu spații (ex: dueDate -> due date)
+        # Separate camelCase with spaces (e.g., dueDate -> due date)
         spaced_name = (
             "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
         )
 
-        # CORECȚIE LOGICĂ: readable_en se construiește din spaced_name, având doar prima literă mare!
+        # readable_en is constructed from spaced_name, with only the first letter capitalized!
         readable_en = spaced_name.capitalize()
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
 
@@ -851,7 +905,7 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
 
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
 
-    # 2. GENERAREA ȘI TRADUCEREA ETICHETELOR DE RELAȚIE (relations.csv)
+    # 2. GENERATE AND TRANSLATE RELATIONSHIP LABELS (relations.csv)
     for rel in relations_list:
         f_name = rel["field"]
 
@@ -887,7 +941,7 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
 
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
 
-    # 3. TITLURILE PENTRU ECRANELE VIZUALE UI GENERATE
+    # 3. TITLES FOR VISUAL UI SCREENS GENERATED
     en_lines.append(
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={n}s"
     )
@@ -902,7 +956,7 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title=Detalii {n}"
     )
 
-    # 4. Funcția internă care adaugă liniile unice
+    # 4. The internal function that adds unique lines
     def append_unique(file_path, lines_to_add):
         existing_content = ""
         if os.path.exists(file_path):
@@ -920,9 +974,9 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
     append_unique(en_path, en_lines)
     append_unique(ro_path, ro_lines)
     print(
-        "✨ Localizarea in engleza si romana pentru entitatea "
+        "✨ Localization in English and Romanian for the entity "
         + n
-        + " a fost injectata cu succes!"
+        + " successfully injected!"
     )
 
 
@@ -936,29 +990,29 @@ def update_menu(n):
         print("⚠️ Nu am gasit fisierul menu.xml la calea specificata!")
         return
 
-    # Generam linia exacta de meniu in formatul Jmix Studio
+    # Generate the exact menu line in the Jmix Studio format
     menu_item = f'    <item view="{n}.list" title="msg://{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title"/>\n'
 
     with open(menu_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Plasa de siguranta: verificam daca ecranul este deja in meniu
+    # For safety: check if the screen is already in the menu
     if ('view="' + n + '.list"') in content:
         print("ℹ️ Ecranul " + n + ".list exista deja in meniu.")
         return
 
-    # Inseram item-ul exact inainte de inchiderea tag-ului principal de meniu
+    # Insert the exact item right before the closing tag of the main menu
     if "</menu>" in content:
         new_content = content.replace("</menu>", menu_item + "</menu>")
         with open(menu_path, "w", encoding="utf-8") as f:
             f.write(new_content)
-        print("Menu injectat cu succes in menu.xml!")
+        print("Menu injected successfully into menu.xml!")
     else:
-        print("⚠️ Structura invalida pentru menu.xml (lipsete tag-ul </menu>)!")
+        print("⚠️ Invalid structure for menu.xml (missing closing </menu> tag)!")
 
 
 if __name__ == "__main__":
-    # Verificăm corect numărul minim de argumente (script + acțiune + nume entitate)
+    # Verify the correct number of arguments (script + action + entity name)
     if len(sys.argv) < 3:
         print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
         sys.exit(1)
@@ -967,13 +1021,13 @@ if __name__ == "__main__":
     name = sys.argv[2]  # Ex: Department
 
     if action == "entity":
-        # Preluăm datele normalizate din cele 3 fișiere CSV din rădăcină
+        # Fetch data from the normalized files in the CSV files
         traits = get_traits_from_csv("traits.csv", name)
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
 
         if not fields_list:
-            print(f" ! Nu s-au găsit câmpuri pentru entitatea '{name}' în entities.csv")
+            print(f" ! No fields found for the entity {name} in entities.csv")
             sys.exit(1)
 
         print(f"Generating Entity {name} from CSV architecture...")
@@ -987,21 +1041,19 @@ if __name__ == "__main__":
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
         if not fields_list:
-            print(f" ! Erorare: Câmpurile pentru {name} nu există în entities.csv")
+            print(f" ! Error: Fields for entity {name} do not exist in entities.csv")
             sys.exit(1)
         gen_list_view_from_csv(name, fields_list, relations_list)
-        update_menu(name)  # adaugă meniul automat, așa cum făceai în variabila ta veche
+        update_menu(name)
 
     elif action == "ui-detail":
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
         if not fields_list:
-            print(f" ! Erorare: Câmpurile pentru {name} nu există în entities.csv")
+            print(f" ! Error: Fields for {name} do not exist in entities.csv")
             sys.exit(1)
         gen_detail_view_from_csv(name, fields_list, relations_list)
 
     else:
-        print(
-            f" ! Acțiune necunoscută: '{action}'. Folosește entity, ui-list sau ui-detail."
-        )
+        print(f" ! Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
         sys.exit(1)
