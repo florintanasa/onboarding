@@ -460,6 +460,9 @@ def gen_liquibase_relations_changelog(name, relations_list):
         if rel["type"] == "N:1":
             f_name = rel["field"].upper()
             tgt_table = rel["target"].upper()
+            # EXCEPȚIE PENTRU CONFIGURAȚIA JMIX:
+            if tgt_table == "USER":
+                tgt_table = "USER_"
             col_name = f"{f_name}_ID"
             fk_name = f"FK_{src_table}_ON_{f_name}"
             nullable_val = "false" if rel["mandatory"] else "true"
@@ -483,6 +486,9 @@ def gen_liquibase_relations_changelog(name, relations_list):
         elif rel["type"] == "1:1":
             f_name = rel["field"].upper()
             tgt_table = rel["target"].upper()
+            # EXCEPȚIE PENTRU CONFIGURAȚIA JMIX:
+            if tgt_table == "USER":
+                tgt_table = "USER_"
             col_name = f"{f_name}_ID"
             fk_name = f"FK_{src_table}_ON_{f_name}"
             nullable_val = "false" if rel["mandatory"] else "true"
@@ -509,6 +515,9 @@ def gen_liquibase_relations_changelog(name, relations_list):
         # NU adaugă coloane în tabelele existente, ci creează o tabelă complet nouă de legătură (Join Table)
         elif rel["type"] == "N:N":
             tgt_table = rel["target"].upper()
+            # EXCEPȚIE PENTRU CONFIGURAȚIA JMIX:
+            if tgt_table == "USER":
+                tgt_table = "USER_"
             join_table = f"{src_table}_{tgt_table}_LINK"
             src_fk = f"{src_table}_ID"
             tgt_fk = f"{tgt_table}_ID"
