@@ -3,4 +3,4 @@ User,N:1,Department,department,false
 User,1:N,UserStep,steps,false
 User,N:1,OnboardingStatus,onboardingStatus,false
 UserStep,N:1,Step,step,true
-UserStep,N:1,User_,user,true
+UserStep,N:1,User,user,true
