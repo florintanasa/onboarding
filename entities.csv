@@ -2,7 +2,8 @@ entity_name,field_name,field_type,mandatory,unique
 Department,name,String,true,true
 Step,name,String,true,true
 Step,duration,Integer,true,false
+Step,sortValue,Integer,true,false
 UserStep,dueDate,LocalDate,true,false
 UserStep,completedDate,LocalDate,false,false
-UserStep,sortOrder,Integer,false,false
+UserStep,sortValue,Integer,false,false
 OnboardingStatus,name,String,true,true
