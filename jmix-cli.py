@@ -752,9 +752,9 @@ def gen_detail_view_from_csv(name, fields_list, relations_list=[]):
             xml_relation_data_containers += (
                 f'            <loader id="{tgt_lower}sDl">\n'
             )
-            xml_relation_data_containers += "                <query>"
+            xml_relation_data_containers += "                <query>\n"
             xml_relation_data_containers += (
-                f"                   <![CDATA[select e from {tgt_class} e]]>"
+                f"                   <![CDATA[select e from {tgt_class} e]]>\n"
             )
             xml_relation_data_containers += "                </query>\n"
             xml_relation_data_containers += "            </loader>\n"
@@ -942,19 +942,68 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
 
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
 
-    # 3. TITLES FOR VISUAL UI SCREENS GENERATED
+    # We are parsing the entity name (e.g., UserStep -> User step)
+    spaced_title = "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
+    readable_title_en = spaced_title.capitalize()  # Now is "User step"
+
+    # 3. TITLES FOR GENERATED UI SCREENS (EN)
+    # For plural (List), we add a simple "s" to the end of the text
     en_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={n}s"
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={readable_title_en}s"
     )
     en_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={n} detail"
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={readable_title_en} detail"
     )
 
+    # For Romanian, we send the new clean title "readable_en" to translategemma:4b
+    prompt_title_list = f"Translate this English text to Romanian. Output ONLY the translated text capitalized. Text: 'List of {readable_title_en}s'"
+    prompt_title_detail = f"Translate this English text to Romanian. Output ONLY the translated text capitalized. Text: '{readable_title_en} details'"
+
+    try:
+        traducere_title_list = (
+            requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "translategemma:4b",
+                    "prompt": prompt_title_list,
+                    "stream": False,
+                },
+                timeout=5,
+            )
+            .json()
+            .get("response", "")
+            .strip()
+        )
+        traducere_title_detail = (
+            requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "translategemma:4b",
+                    "prompt": prompt_title_detail,
+                    "stream": False,
+                },
+                timeout=5,
+            )
+            .json()
+            .get("response", "")
+            .strip()
+        )
+    except Exception:
+        traducere_title_list = ""
+        traducere_title_detail = ""
+
+    # Clear fallback mechanisms if the model fails or returns overly long text
+    if not traducere_title_list or len(traducere_title_list) > 50:
+        traducere_title_list = f"Lista {readable_title_en}"
+    if not traducere_title_detail or len(traducere_title_detail) > 50:
+        traducere_title_detail = f"Detalii {readable_title_en}"
+
+    # TITLES FOR GENERATED UI SCREENS (RO)
     ro_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title=Lista {n}"
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={traducere_title_list}"
     )
     ro_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title=Detalii {n}"
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={traducere_title_detail}"
     )
 
     # 4. The internal function that adds unique lines
