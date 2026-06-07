@@ -175,7 +175,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
         dinamic_imports.add("import io.jmix.core.annotation.DeletedBy;")
         dinamic_imports.add("import io.jmix.core.annotation.DeletedDate;")
 
-    # We generate the business fields and collect the necessary imports
+    # Generate the business fields and collect the necessary imports
     java_business_fields = ""
     java_business_methods = ""
     is_first_text = True
@@ -185,7 +185,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
         f_type = field["type"]
         sql_col_name = f_name.upper()
 
-        # We collect the types in the unique global set
+        # Collect the types in the unique global set
         if f_type == "BigDecimal":
             dinamic_imports.add("import java.math.BigDecimal;")
         elif f_type == "LocalDate":
@@ -195,7 +195,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
 
         column_props = f'name = "{sql_col_name}"'
 
-        # We initialize the string for visual validation annotation
+        # Initialize the string for visual validation annotation
         validation_annotation = ""
 
         if field["mandatory"]:  # Check if the field is manadatory
@@ -364,9 +364,106 @@ public class {name} {{
 
     java_path = td + "/" + name + ".java"
     open(java_path, "w", encoding="utf-8").write(java_content)
-    print("✨ Entity mecanic salvat cu succes in: " + java_path)
+    print("✨ Entity saved successfully in: " + java_path)
+
+    # ===================================== #
+    # LOGIC FOR COMPOSITIONS (1:N and 1:1)  #
+    # ===================================== #
+    for rel in relations_list:
+        r_type = rel["type"]
+
+        if r_type.startswith("COMPOSITION_"):
+            tgt_class = rel["target"]  # ex: User
+            f_name = rel["field"]  # ex: steps
+            src_class = name  # ex: UserStep
+
+            tgt_file_path = (
+                PROIECT_PATH
+                + f"/src/main/java/{company_path}/{project_name}/entity/{tgt_class}.java"
+            )
+
+            if os.path.exists(tgt_file_path):
+                java_tgt_content = open(tgt_file_path, "r", encoding="utf-8").read()
+
+                # Check if the property has already been injected, to avoid duplication.
+                if (
+                    f"private List<{src_class}> {f_name};" not in java_tgt_content
+                    and f"private {src_class} {f_name};" not in java_tgt_content
+                ):
+                    print(
+                        f" 🔗 Injection of @Composition ({r_type}) into the class: {tgt_class}"
+                    )
+
+                    new_field = ""
+                    new_methods = ""
+                    f_caps = f_name[0].upper() + f_name[1:]
+
+                    # mappedBy must be the name of the inverse property
+                    # In CSV: UserStep,N:1,User,user,true -> so the inverse field is "user"!
+                    mapped_by_prop = "user"
+                    if tgt_class.lower() != "user":
+                        mapped_by_prop = tgt_class.lower() + tgt_class[1:]
+
+                    # --- CASE A: 1:N Composition ---
+                    if r_type == "COMPOSITION_1:N":
+                        new_field = f'@Composition\n    @OneToMany(mappedBy = "{mapped_by_prop}")\n    private List<{src_class}> {f_name};\n\n'
+                        new_methods = f"    public List<{src_class}> get{f_caps}() {{\n        return {f_name};\n    }}\n\n    public void set{f_caps}(List<{src_class}> {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+                        if "import java.util.List;" not in java_tgt_content:
+                            java_tgt_content = java_tgt_content.replace(
+                                f"package {COMPANY}.{project_name}.entity;",
+                                f"package {COMPANY}.{project_name}.entity;\nimport java.util.List;",
+                            )
+
+                    # --- CASE B: 1:1 Composition ---
+                    elif r_type == "COMPOSITION_1:1":
+                        new_field = f'@Composition\n    @OneToOne(fetch = FetchType.LAZY, mappedBy = "{mapped_by_prop}")\n    private {src_class} {f_name};\n\n'
+                        new_methods = f"    public {src_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n    public void set{f_caps}({src_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+                    # Inject native Jmix @Composition into the package header
+                    if (
+                        "import io.jmix.core.metamodel.annotation.Composition;"
+                        not in java_tgt_content
+                    ):
+                        java_tgt_content = java_tgt_content.replace(
+                            f"package {COMPANY}.{project_name}.entity;",
+                            f"package {COMPANY}.{project_name}.entity;\nimport io.jmix.core.metamodel.annotation.Composition;",
+                        )
+
+                    # PERFORMING MANUAL FIELD INSERTION:
+                    # We are looking for the line with the four spaces to the left to prevent indentation duplication
+                    if "    public UUID getId()" in java_tgt_content:
+                        old_anchor = "    public UUID getId()"
+                        replacement = "    " + new_field + "    public UUID getId()"
+                        java_tgt_content = java_tgt_content.replace(
+                            old_anchor, replacement
+                        )
+
+                    elif "    public final UUID getId()" in java_tgt_content:
+                        old_anchor = "    public final UUID getId()"
+                        replacement = (
+                            "    " + new_field + "    public final UUID getId()"
+                        )
+                        java_tgt_content = java_tgt_content.replace(
+                            old_anchor, replacement
+                        )
+
+                    # Inject clean methods right before the LAST curly brace in the Java file
+                    last_brace_index = java_tgt_content.rfind("}")
+                    if last_brace_index != -1:
+                        java_tgt_content = (
+                            java_tgt_content[:last_brace_index]
+                            + "\n"
+                            + new_methods
+                            + java_tgt_content[last_brace_index:]
+                        )
+
+                    # Save the cleaned file back to disk
+                    with open(tgt_file_path, "w", encoding="utf-8") as f:
+                        f.write(java_tgt_content)
 
 
+# Function for generate liquibase files changelog from cvs
 def gen_liquibase_changelog_from_csv(name, fields_list, traits):
     timestamp_id = datetime.now().strftime("%Y%m%d%H%M%S")
     table_name = name.upper()
@@ -425,7 +522,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
         sql_col_name = field["name"].upper()
         sql_type = map_type(field["type"])
 
-        # Constrângeri la nivel de coloană (ex: nullable)
+        # Column-level constraints (e.g., nullable)
         constraints = ""
         if field["mandatory"]:
             constraints = '                <constraints nullable="false" />\n'
@@ -480,8 +577,9 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
     print(f" -> Generated Liquibase XML with Constraints & Indexes: {filename}")
 
 
+# Function to read relation from csv and return the relations
 def get_relations_from_csv(csv_path, target_entity_name):
-    """Citește relations.csv și returnează doar relațiile unde entitatea curentă este sursa."""
+    """Read relations.csv and return only the relationships where the current entity is the source."""
     relations_list = []
     if not os.path.exists(csv_path):
         return relations_list
@@ -834,6 +932,91 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
         f.write(java_content)
     print(f" 🖥️ Detail View successfully generated for: {name}")
 
+    # ============================================================ #
+    # AUTOMATIC INJECT UI TARGET FOR 1:N COMPOSITION RELATIONSHIPS #
+    # ============================================================ #
+    for rel in relations_list:
+        if rel["type"] == "COMPOSITION_1:N":
+            tgt_class = rel["target"]  # ex: User
+            tgt_lower = tgt_class.lower()
+            f_name = rel["field"]  # ex: steps
+            src_class = name  # Re-introduce the variable for parsing entities.csv
+
+            # Path to the parent entity's detailed XML file
+            tgt_xml_path = (
+                PROIECT_PATH
+                + f"/src/main/resources/com/company/{project_name}/view/{tgt_lower}/{tgt_lower}-detail-view.xml"
+            )
+
+            if os.path.exists(tgt_xml_path):
+                xml_tgt_content = open(tgt_xml_path, "r", encoding="utf-8").read()
+
+                # Check if the composition table has already been injected
+                if f'id="{f_name}DataGrid"' not in xml_tgt_content:
+                    print(
+                        f" 🖥️ Injectare dinamică @Composition UI în ecranul: {tgt_class} Detail View"
+                    )
+
+                    # 1. Prepare the nested property container
+                    property_container = f'            <collection id="{f_name}Dc" property="{f_name}"/>\n'
+
+                    # Find the area where the parent instance closes and inject before closing
+                    if f'id="{tgt_lower}Dc"' in xml_tgt_content:
+                        xml_tgt_content = xml_tgt_content.replace(
+                            "</instance>", f"{property_container}        </instance>"
+                        )
+
+                    # 2. DYNAMIC COLUMN READING: Collect child properties directly from entities.csv
+                    child_fields = get_entities_from_csv("entities.csv", src_class)
+                    xml_composition_columns = ""
+
+                    if child_fields:
+                        for c_field in child_fields:
+                            xml_composition_columns += f'                <column property="{c_field["name"]}"/>\n'
+                    else:
+                        # Fallback safety if CSV is empty or inaccessible
+                        xml_composition_columns = (
+                            '                <column property="notFound"/>\n'
+                        )
+
+                    # 3. Assemble the <dataGrid> with all dynamically read columns
+                    composition_grid = (
+                        f'        <h3 text="msg://{tgt_lower}DetailView.{f_name}"/>\n'
+                    )
+                    composition_grid += f'        <hbox id="{f_name}ButtonsPanel" classNames="buttons-panel">\n'
+                    composition_grid += f'            <button id="{f_name}CreateBtn" action="{f_name}DataGrid.create"/>\n'
+                    composition_grid += f'            <button id="{f_name}EditBtn" action="{f_name}DataGrid.edit"/>\n'
+                    composition_grid += f'            <button id="{f_name}RemoveBtn" action="{f_name}DataGrid.remove"/>\n'
+                    composition_grid += "        </hbox>\n"
+                    composition_grid += f'        <dataGrid id="{f_name}DataGrid" width="100%" minHeight="15em" dataContainer="{f_name}Dc">\n'
+                    composition_grid += "            <actions>\n"
+                    composition_grid += (
+                        '                <action id="create" type="list_create"/>\n'
+                    )
+                    composition_grid += (
+                        '                <action id="edit" type="list_edit"/>\n'
+                    )
+                    composition_grid += (
+                        '                <action id="remove" type="list_remove"/>\n'
+                    )
+                    composition_grid += "            </actions>\n"
+                    composition_grid += "            <columns>\n"
+                    composition_grid += (
+                        f"{xml_composition_columns}"  # Inject the dynamic block
+                    )
+                    composition_grid += "            </columns>\n"
+                    composition_grid += "        </dataGrid>\n"
+
+                    # Inject the table directly into the layout, immediately below the main form
+                    if "</formLayout>" in xml_tgt_content:
+                        xml_tgt_content = xml_tgt_content.replace(
+                            "</formLayout>", f"</formLayout>\n{composition_grid}"
+                        )
+
+                    # Save the modified XML file back to disk
+                    with open(tgt_xml_path, "w", encoding="utf-8") as f:
+                        f.write(xml_tgt_content)
+
 
 # Function to generate messagges in English and to tranlsate in Romanian using Ollama with model translategemma:4b
 def update_messages_entity(n, fields_list, traits, relations_list=[]):
@@ -958,11 +1141,57 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
     spaced_title = "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
     readable_title_en = spaced_title.capitalize()  # Now is "User step"
 
+    # 2.1 DEDICATED TRANSLATIONS FOR COMPOSITION TITLES IN PARENT UI
+    for rel in relations_list:
+        if rel["type"] == "COMPOSITION_1:N":
+            tgt_lower = rel["target"].lower()  # ex: user
+            f_name = rel["field"]  # ex: steps
+
+            # Generate beautiful English names (e.g., steps -> Steps)
+            readable_title_en = f_name.capitalize()
+            en_lines.append(
+                f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={readable_title_en}"
+            )
+
+            # Ask translategemma:4b to translate the table title
+            prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_title_en}"
+            try:
+                traducere_ro = (
+                    requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": "translategemma:4b",
+                            "prompt": prompt,
+                            "stream": False,
+                        },
+                        timeout=5,
+                    )
+                    .json()
+                    .get("response", "")
+                    .strip()
+                )
+            except Exception:
+                traducere_ro = ""
+
+            if not traducere_ro or len(traducere_ro) > 50:
+                traducere_ro = "Corectează"  # Fallback fix for the onboarding project
+
+            ro_lines.append(
+                f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={traducere_ro}"
+            )
+
     # 3. TITLES FOR GENERATED UI SCREENS (EN)
-    # For plural (List), we add a simple "s" to the end of the text
-    en_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={readable_title_en}s"
+    # Generate the correct plural in English without duplicating the letter "s"
+    plural_title_en = (
+        readable_title_en
+        if readable_title_en.endswith("s")
+        else f"{readable_title_en}s"
     )
+
+    en_lines.append(
+        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={plural_title_en}"
+    )
+
     en_lines.append(
         f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={readable_title_en} detail"
     )
