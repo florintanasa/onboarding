@@ -823,6 +823,7 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
     print(f" 🖥️ Detail View successfully generated for: {name}")
 
 
+# Function to generate messagges in English and to tranlsate in Romanian using Ollama with model translategemma:4b
 def update_messages_entity(n, fields_list, traits, relations_list=[]):
     print("Generating localization messages for " + n + "...")
 
@@ -845,7 +846,7 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Created by")
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Created date")
         ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Creat de")
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data crearii")
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data creării")
     if traits["audit_of_modification"]:
         en_lines.append(
             f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Last modified by"
@@ -857,14 +858,14 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
             f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Modificat de"
         )
         ro_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificarii"
+            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificării"
         )
     if traits["soft_delete"]:
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Deleted by")
         en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Deleted date")
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Sters de")
+        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Șters de")
         ro_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data stergerii"
+            f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data ștergerii"
         )
 
     # 1. GENERATE AND TRANSLATE BUSINESS FIELDS (entities.csv)
@@ -909,7 +910,7 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
     for rel in relations_list:
         f_name = rel["field"]
 
-        # Separă camelCase cu spații pentru relații
+        # Separate camelCase with spaces for relationships
         spaced_name = (
             "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
         )
@@ -980,12 +981,14 @@ def update_messages_entity(n, fields_list, traits, relations_list=[]):
     )
 
 
+# Function for update the menu
 def update_menu(n):
     print("Updating menu.xml for " + n + "...")
     menu_path = (
         PROIECT_PATH + f"/src/main/resources/{company_path}/{project_name}/menu.xml"
     )
 
+    # Check and inform if not exist the menu.xml file in the path
     if not os.path.exists(menu_path):
         print(f"⚠️ I not found the file menu.xml in the path {menu_path}!")
         return
@@ -1027,7 +1030,7 @@ if __name__ == "__main__":
         relations_list = get_relations_from_csv("relations.csv", name)
 
         if not fields_list:
-            print(f" ⚠ No fields found for the entity {name} in entities.csv")
+            print(f" ⚠ No fields found for the entity '{name}' in entities.csv")
             sys.exit(1)
 
         print(f"Generating Entity {name} from CSV architecture...")
@@ -1041,7 +1044,7 @@ if __name__ == "__main__":
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
         if not fields_list:
-            print(f" ⚠ Error: Fields for entity {name} do not exist in entities.csv")
+            print(f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv")
             sys.exit(1)
         gen_list_view_from_csv(name, fields_list, relations_list)
         update_menu(name)
@@ -1050,7 +1053,7 @@ if __name__ == "__main__":
         fields_list = get_entities_from_csv("entities.csv", name)
         relations_list = get_relations_from_csv("relations.csv", name)
         if not fields_list:
-            print(f" ⚠ Error: Fields for {name} do not exist in entities.csv")
+            print(f" ⚠ Error: Fields for '{name}' do not exist in entities.csv")
             sys.exit(1)
         gen_detail_view_from_csv(name, fields_list, relations_list)
 
