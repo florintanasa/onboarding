@@ -175,7 +175,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
         dinamic_imports.add("import io.jmix.core.annotation.DeletedBy;")
         dinamic_imports.add("import io.jmix.core.annotation.DeletedDate;")
 
-    # Generăm câmpurile de business și colectăm importurile necesare
+    # We generate the business fields and collect the necessary imports
     java_business_fields = ""
     java_business_methods = ""
     is_first_text = True
@@ -185,7 +185,7 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
         f_type = field["type"]
         sql_col_name = f_name.upper()
 
-        # Colectăm tipurile în setul global unic
+        # We collect the types in the unique global set
         if f_type == "BigDecimal":
             dinamic_imports.add("import java.math.BigDecimal;")
         elif f_type == "LocalDate":
@@ -194,15 +194,22 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
             dinamic_imports.add("import java.time.LocalDateTime;")
 
         column_props = f'name = "{sql_col_name}"'
-        if field["mandatory"]:
+
+        # We initialize the string for visual validation annotation
+        validation_annotation = ""
+
+        if field["mandatory"]:  # Check if the field is manadatory
             column_props += ", nullable = false"
+            # Add @NotNull and import the Jakarta Validation
+            validation_annotation = "    @NotNull\n"
+            dinamic_imports.add("import jakarta.validation.constraints.NotNull;")
 
         instance_name_annotation = ""
         if f_type.lower() == "string" and is_first_text:
             instance_name_annotation = "    @InstanceName\n"
             is_first_text = False
 
-        java_business_fields += f"{instance_name_annotation}    @Column({column_props})\n    private {f_type} {f_name};\n\n"
+        java_business_fields += f"{instance_name_annotation}{validation_annotation}    @Column({column_props})\n    private {f_type} {f_name};\n\n"
 
         f_caps = f_name[0].upper() + f_name[1:]
         java_business_methods += f"    public {f_type} get{f_caps}() {{\n        return {f_name};\n    }}\n\n    public void set{f_caps}({f_type} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
@@ -224,10 +231,15 @@ def gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list=[]):
             dinamic_imports.add("import jakarta.persistence.JoinColumn;")
 
             join_props = f'name = "{sql_fk_col}"'
+            validation_annotation = ""
+
             if rel["mandatory"]:
                 join_props += ", nullable = false"
+                validation_annotation = "    @NotNull\n"
+                dinamic_imports.add("import jakarta.validation.constraints.NotNull;")
 
             java_relation_fields += f"    @JoinColumn({join_props})\n"
+            java_relation_fields += f"{validation_annotation}"
             java_relation_fields += "    @ManyToOne(fetch = FetchType.LAZY)\n"
             java_relation_fields += f"    private {tgt_class} {f_name};\n\n"
 
