@@ -28,6 +28,8 @@
 import csv
 import os
 import re
+import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +42,10 @@ PROIECT_PATH = str(Path.cwd())
 
 # Function to read the the file settings.gradle file to find and return project name
 def get_project_name(settings_path: Path = Path("settings.gradle")) -> str | None:
+    # Safety for an empty folder (init command case)
+    if not settings_path.exists():
+        return None
+
     text = settings_path.read_text(encoding="utf-8")
     # Find rootProject.name = 'name' or "name"
     m = re.search(r"""rootProject\.name\s*=\s*(['"])(.*?)\1""", text)
@@ -53,6 +59,10 @@ project_name = (PROJECT or "").lower()  # transform project name in lower letter
 
 # Function to read the the file settings.gradle file to find and return project name
 def get_company_name(settings_path: Path = Path("build.gradle")) -> str | None:
+    # Safety for an empty folder (init command case)
+    if not settings_path.exists():
+        return None
+
     text = settings_path.read_text(encoding="utf-8")
     # Find group = 'com.company' or "com.company"
     m = re.search(r"""group\s*=\s*(['"])(.*?)\1""", text)
@@ -1304,7 +1314,190 @@ def update_menu(n):
         print("⚠️ Invalid structure for menu.xml (missing closing </menu> tag)!")
 
 
+# ==============================================================================
+# SUB-SISTEM COMMANDE INIT (Independent CLI - stil cuba-cli)
+# ==============================================================================
+
+
+def cmd_init_project(project_name, target_group):
+    """
+    Download the Jmix 2.x template and completely reconfigure directories,
+    Java packages, XML resources, Liquibase, and localized translations.
+    Dynamically calculate the base package by concatenation.
+    """
+    # Automatically calculate base_package (e.g., com.company + onboarding = com.company.onboarding)
+    base_package = (
+        f"{target_group.strip().strip('.')}.{project_name.strip().strip('.')}"
+    )
+
+    repo_url = "https://github.com/jmix-framework/jmix-ai-template"
+    current_dir = os.getcwd()
+    target_dir = os.path.join(current_dir, project_name)
+
+    print(f"\n[*] New Jmix Project Initialization: '{project_name}'")
+    print(f"[*] Group ID (Target):         {target_group}")
+    print(f"[*] Generated Base Package:  {base_package}")
+    print("-" * 60)
+
+    if os.path.exists(target_dir):
+        print(
+            f"[-] Critical Error: The '{project_name}' folder already exists in this directory."
+        )
+        sys.exit(1)
+
+    print("[*] Step 1: Download the official modern Jmix template...")
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", repo_url, project_name], check=True
+        )
+    except Exception as e:
+        print(f"[-] Error executing the Git clone command: {e}")
+        sys.exit(1)
+
+    # Remove the Git history of the template for a clean repository
+    shutil.rmtree(os.path.join(target_dir, ".git"), ignore_errors=True)
+    print("[+] Git history of the template has been cleaned.")
+
+    # Define the incorrect package variation from the official Jmix template (Fix 'template' typo)
+    old_package_dots = "io.jmix.tempate"
+    old_package_slashes = "io/jmix/tempate"
+
+    new_package_slashes = os.path.join(*base_package.split("."))
+    new_package_property_slashes = base_package.replace(".", "/")
+
+    # Physical layers that require moving to disk
+    paths_to_move = [
+        (
+            os.path.join(target_dir, "src", "main", "java"),
+            old_package_slashes,
+            new_package_slashes,
+        ),
+        (
+            os.path.join(target_dir, "src", "test", "java"),
+            old_package_slashes,
+            new_package_slashes,
+        ),
+        (
+            os.path.join(target_dir, "src", "main", "resources"),
+            old_package_slashes,
+            new_package_slashes,
+        ),
+    ]
+
+    print("[*] Step 2: Refactoring structural Java layers and XML resources...")
+    for base_root, old_rel, new_rel in paths_to_move:
+        src_dir = os.path.join(base_root, old_rel)
+        dst_dir = os.path.join(base_root, new_rel)
+
+        if os.path.exists(src_dir):
+            os.makedirs(dst_dir, exist_ok=True)
+            for item in os.listdir(src_dir):
+                shutil.move(os.path.join(src_dir, item), os.path.join(dst_dir, item))
+            # Clean up empty parent folders from the io/jmix hierarchy
+            shutil.rmtree(os.path.join(base_root, "io"), ignore_errors=True)
+
+    print(
+        "[*] Step 3: Rewriting text from metadata (Gradle, Spring, Liquibase, Translations)..."
+    )
+    files_to_update = [
+        os.path.join(target_dir, "build.gradle"),
+        os.path.join(target_dir, "settings.gradle"),
+        os.path.join(target_dir, "src", "main", "resources", "application.properties"),
+    ]
+
+    # Dynamically scan moved files to add them to the search & replace text pipeline
+    for base_root, _, new_rel in paths_to_move:
+        scan_root = os.path.join(base_root, new_rel)
+        if os.path.exists(scan_root):
+            for root, _, files in os.walk(scan_root):
+                for file in files:
+                    if file.endswith((".java", ".xml", ".properties")):
+                        files_to_update.append(os.path.join(root, file))
+
+    for file_path in files_to_update:
+        if not os.path.exists(file_path):
+            continue
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Rewrite project parameters in Gradle
+        if "build.gradle" in file_path:
+            content = re.sub(
+                r"group\s*=\s*['\"].*?['\"]", f"group = '{target_group}'", content
+            )
+        if "settings.gradle" in file_path:
+            content = re.sub(
+                r"rootProject\.name\s*=\s*['\"].*?['\"]",
+                f"rootProject.name = '{project_name}'",
+                content,
+            )
+
+        # Correct packages with dots and slashes (Liquibase changelog + MessageSourceBasenames)
+        content = content.replace(old_package_dots, base_package)
+        content = content.replace(old_package_slashes, new_package_property_slashes)
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    print("[*] Step 4: Apply Unix execution permissions for the Gradle Wrapper...")
+    gradlew_path = os.path.join(target_dir, "gradlew")
+    if os.path.exists(gradlew_path):
+        try:
+            os.chmod(gradlew_path, 0o755)
+            print("[+] The 'chmod +x' permission has been applied successfully.")
+        except Exception as e:
+            print(f"[-] NOTE permissions for gradlew: {e}")
+
+    print("\n" + "=" * 60)
+    print(f"[+] PROJECT SUCCESSFULLY INITIALIZED: {project_name}")
+    print(f"[+] Run: mv jmix-cli {project_name}/ # for continue the project")
+    print(f"[+] Run: cd {project_name} && ./gradlew bootRun # to test")
+    print("=" * 60 + "\n")
+
+
+def print_cli_help():
+    """Display the user manual for your new CLI"""
+    print("\n🚀 JMIX CLI - COMBINED COMMAND HELP")
+    print("-" * 50)
+    print("Usage instructions for initializing a new project:")
+    print("  python jmix-cli.py init <project_name> <target_group>")
+    print("  -> Example: python jmix-cli.py onboarding com.company")
+    print("\nUsage instructions for generation (existing project):")
+    print("  Run with next parameters inside a valid Jmix folder project")
+    print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
+    print("  to process the traits.csv, entities.csv and relations.csv files.")
+    print("-" * 50 + "\n")
+
+
 if __name__ == "__main__":
+    # Check if the user wants to initialize a new project
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "init":
+        if len(sys.argv) < 4:
+            print("[-] Error: Missing required parameters.")
+            print_cli_help()
+            sys.exit(1)
+
+        p_name = sys.argv[2]
+        t_group = sys.argv[3]
+        cmd_init_project(p_name, t_group)
+        sys.exit(0)
+
+    elif len(sys.argv) > 1 and sys.argv[1].lower() in ["help", "--help", "-h"]:
+        print_cli_help()
+        sys.exit(0)
+
+    # -----------------------------------------------------
+    # (Default run in the absence of the 'init' command)
+    # -----------------------------------------------------
+    print(f"[*] Run Jmix CLI engine generation on the current project: '{PROJECT}'...")
+
+    # Perform a safety check to ensure we are in a valid project
+    if not PROJECT:
+        print("[-] No valid Jmix project detected in this folder.")
+        print_cli_help()
+        sys.exit(1)
+
     # Verify the correct number of arguments (script + action + entity name)
     if len(sys.argv) < 3:
         print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
