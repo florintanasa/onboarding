@@ -1065,58 +1065,78 @@ def ask_ollama_translation(text_to_translate, target_language_name):
     return text_to_translate
 
 
+# Function to generate messages in all configured languages using Ollama dynamically
 def update_messages_entity(project_dir, base_package, entity_name, traits_list):
     """
-    Automatically scan active languages in the project and inject localized translations
-    for entities and their traits (traits) into the corresponding message files.
+    Parametric localizer engine. Corrects string-boolean evaluation from traits.csv,
+    injects side menu keys for menu.xml, and stabilizes Ollama text translation responses.
     """
-    # Determine the physical path to the resource folder in the generated bundle
-    package_path_slashes = base_package.replace(".", "/")
-    msg_dir = os.path.join(
-        project_dir, "src", "main", "resources", package_path_slashes
-    )
-    app_properties_path = os.path.join(
-        project_dir, "src", "main", "resources", "application.properties"
+    n = entity_name.strip()
+    print(
+        f"Generating dynamic parametric localization messages for exact entity {n}..."
     )
 
-    if not os.path.exists(app_properties_path):
-        return
-
-    # Step 1: Read properties to find out which languages are active in the project.
+    app_properties_path = project_dir + "/src/main/resources/application.properties"
     available_locales = ["en"]
-    with open(app_properties_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if "jmix.core.available-locales" in line:
-                match = re.search(r"jmix\.core\.available-locales\s*=\s*(.*)", line)
-                if match:
-                    available_locales = [
-                        loc.strip() for loc in match.group(1).split(",") if loc.strip()
-                    ]
 
-    # The name for the base class in English (e.g., UserStep -> User Step)
-    entity_english_label = re.sub(r"(?<!^)(?=[A-Z])", " ", entity_name)
+    if os.path.exists(app_properties_path):
+        with open(app_properties_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if "jmix.core.available-locales" in line:
+                    match = re.search(r"jmix\.core\.available-locales\s*=\s*(.*)", line)
+                    if match:
+                        available_locales = [
+                            loc.strip()
+                            for loc in match.group(1).split(",")
+                            if loc.strip()
+                        ]
 
-    # Step 2: Process each language configured in the system
+    package_path_slashes = base_package.replace(".", "/")
+    base_path = project_dir + f"/src/main/resources/{package_path_slashes}"
+
+    # Read traits config from traits.csv dynamically to fix string-to-boolean evaluation bug
+    entity_traits = {
+        "versioned": False,
+        "audit_of_creation": False,
+        "audit_of_modification": False,
+        "soft_delete": False,
+    }
+    traits_csv_path = project_dir + "/traits.csv"
+    if os.path.exists(traits_csv_path):
+        with open(traits_csv_path, mode="r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("entity_name", "").strip() == n:
+                    # Explicit string evaluation check to fix the boolean override issue
+                    entity_traits["versioned"] = (
+                        row.get("versioned", "").strip().lower() == "true"
+                    )
+                    entity_traits["audit_of_creation"] = (
+                        row.get("audit_of_creation", "").strip().lower() == "true"
+                    )
+                    entity_traits["audit_of_modification"] = (
+                        row.get("audit_of_modification", "").strip().lower() == "true"
+                    )
+                    entity_traits["soft_delete"] = (
+                        row.get("soft_delete", "").strip().lower() == "true"
+                    )
+
+    # Human readable text conversions
+    spaced_title = "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
+    readable_title_en = spaced_title.capitalize()
+    plural_title_en = (
+        readable_title_en
+        if readable_title_en.endswith("s")
+        else f"{readable_title_en}s"
+    )
+
     for locale in available_locales:
-        # Determinăm numele fișierului pe disc
         if locale == "en":
-            file_name = "messages_en.properties"
+            target_path = base_path + "/messages_en.properties"
+            lang_name = "English"
+            primary_iso = "en"
         else:
-            file_name = f"messages_{locale}.properties"
-
-        file_path = os.path.join(msg_dir, file_name)
-        if not os.path.exists(file_path):
-            continue
-
-        # Generate the necessary translations
-        if locale == "en":
-            entity_translated = entity_english_label
-            traits_translations = {
-                trait: re.sub(r"(?<!^)(?=[A-Z])", " ", trait).capitalize()
-                for trait in traits_list
-            }
-        else:
-            # Universal ISO mapping dictionary to identify the full language name for Ollama prompts
+            target_path = base_path + f"/messages_{locale}.properties"
             iso_lang_names = {
                 "ar": "Arabic",
                 "ckb": "Central Kurdish",
@@ -1132,60 +1152,209 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
                 "tr": "Turkish",
                 "zh": "Simplified Chinese",
             }
-
-            # Extract the primary ISO prefix (e.g., from "ro_RO" or "ro_MD" we get "ro", from "zh_cn" we get "zh")
             primary_iso = locale.split("_")[0].lower()
-
-            # Fetch the clean English name of the target language, falling back to the raw locale string if missing
             lang_name = iso_lang_names.get(primary_iso, locale)
 
-            print(
-                f"[*] Calling Ollama to translate '{entity_name}' architecture into {lang_name}..."
-            )
-            entity_translated = ask_ollama_translation(
-                entity_english_label, lang_name
-            ).capitalize()
+        target_lines = []
+        target_lines.append(f"{base_package}.entity/{n}={n}")
+        target_lines.append(f"{base_package}.entity/{n}.id=Id")
 
-            traits_translations = {}
-            for trait in traits_list:
-                trait_english_label = re.sub(
-                    r"(?<!^)(?=[A-Z])", " ", trait
-                ).capitalize()
-                translated_trait = ask_ollama_translation(
-                    trait_english_label, lang_name
+        # --- DYNAMIC TRAITS LOCALIZATION (FIXED STRINGS EVALUATION) ---
+        if entity_traits["versioned"]:
+            v_text = "Version" if locale == "en" else "Versiune"
+            target_lines.append(f"{base_package}.entity/{n}.version={v_text}")
+
+        if entity_traits["audit_of_creation"]:
+            cb = "Created by" if locale == "en" else "Creat de"
+            cd = "Created date" if locale == "en" else "Data creării"
+            target_lines.append(f"{base_package}.entity/{n}.createdBy={cb}")
+            target_lines.append(f"{base_package}.entity/{n}.createdDate={cd}")
+
+        if entity_traits["audit_of_modification"]:
+            mb = "Last modified by" if locale == "en" else "Modificat de"
+            md = "Last modified date" if locale == "en" else "Data modificării"
+            target_lines.append(f"{base_package}.entity/{n}.lastModifiedBy={mb}")
+            target_lines.append(f"{base_package}.entity/{n}.lastModifiedDate={md}")
+
+        if entity_traits["soft_delete"]:
+            db = "Deleted by" if locale == "en" else "Șters de"
+            dd = "Deleted date" if locale == "en" else "Data ștergerii"
+            target_lines.append(f"{base_package}.entity/{n}.deletedBy={db}")
+            target_lines.append(f"{base_package}.entity/{n}.deletedDate={dd}")
+
+        # --- PROCESS FIELDS AND RELATIONSHIPS ---
+        for trait in traits_list:
+            spaced_name = (
+                "".join([" " + c if c.isupper() else c for c in trait]).strip().lower()
+            )
+            readable_en = spaced_name.capitalize()
+
+            if locale == "en":
+                # Write English without calling Ollama to prevent model distortions
+                target_lines.append(f"{base_package}.entity/{n}.{trait}={readable_en}")
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.{trait}Field={readable_en}"
                 )
-                traits_translations[trait] = translated_trait
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.{trait}Column={readable_en}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.dataGrid.{trait}={readable_en}"
+                )
+            else:
+                # Optimized conversational translation prompt for human-like outputs (No shouting text!)
+                prompt = (
+                    f"You are a professional software translator. Translate this UI label "
+                    f"from English into {lang_name}. Return ONLY the natural translation, "
+                    f"properly capitalized, without any quotes or punctuation. Label: {readable_en}"
+                )
+                try:
+                    traducere_lang = (
+                        requests.post(
+                            "http://localhost:11434/api/generate",
+                            json={
+                                "model": "translategemma:4b",
+                                "prompt": prompt,
+                                "stream": False,
+                            },
+                            timeout=5,
+                        )
+                        .json()
+                        .get("response", "")
+                        .strip()
+                    )
+                except Exception:
+                    traducere_lang = ""
 
-        # Step 3: Build the properties block according to the Jmix standard
-        new_properties_lines = []
-        new_properties_lines.append(f"\n# Entity: {entity_name}")
-        new_properties_lines.append(
-            f"{base_package}.entity/{entity_name} = {entity_translated}"
-        )
+                # Cleanup residual markdown quotes or dots from LLM
+                traducere_lang = (
+                    traducere_lang.replace('"', "")
+                    .replace("'", "")
+                    .replace(".", "")
+                    .strip()
+                )
+                if (
+                    not traducere_lang
+                    or "Error" in traducere_lang
+                    or len(traducere_lang) > 50
+                ):
+                    traducere_lang = readable_en
 
-        for trait, translation in traits_translations.items():
-            new_properties_lines.append(
-                f"{base_package}.entity/{entity_name}.{trait} = {translation}"
+                target_lines.append(
+                    f"{base_package}.entity/{n}.{trait}={traducere_lang}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.{trait}Field={traducere_lang}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.{trait}Column={traducere_lang}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.dataGrid.{trait}={traducere_lang}"
+                )
+
+        # --- VIEW TITLES AND SIDEBAR MENUS CONFIGURATION (FIXED FOR menu.xml) ---
+        if locale == "en":
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}ListView.title={plural_title_en}"
             )
-
-        # Step 4: Securely write to the file (Clean append without duplication)
-        with open(file_path, "r", encoding="utf-8") as f:
-            existing_content = f.read()
-
-        # Check if the properties of this entity already exist to avoid duplication on repeated runs
-        check_string = f"{base_package}.entity/{entity_name} ="
-        if check_string in existing_content:
-            # If they already exist, replace them or skip them, depending on the desired UX.
-            # For safety, we only append lines that actually are missing or rewrite the entire block cleanly.
-            print(
-                f"[!] Labels for '{entity_name}' already present in {file_name}. Skipping to prevent overwriting."
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.title={readable_title_en} Details"
             )
+            # Menu item injection matching menu.xml layout rules
+            target_lines.append(f"{base_package}/menu.{n}.list={plural_title_en}")
         else:
-            with open(file_path, "a", encoding="utf-8") as f:
-                f.write("\n".join(new_properties_lines) + "\n")
-            print(
-                f"[+] Successfully injected {locale} translations for entity '{entity_name}'"
+            prompt_list = f"Translate this software menu title to {lang_name}. Output ONLY the raw translation, capitalized and without your comments. Text: {plural_title_en}"
+            prompt_detail = f"Translate this software view title to {lang_name}. Output ONLY the raw translation, capitalized and without your comments. Text: {readable_title_en} Details"
+            try:
+                traducere_title_list = (
+                    requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": "translategemma:4b",
+                            "prompt": prompt_list,
+                            "stream": False,
+                        },
+                        timeout=5,
+                    )
+                    .json()
+                    .get("response", "")
+                    .strip()
+                    .replace('"', "")
+                )
+                traducere_title_detail = (
+                    requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": "translategemma:4b",
+                            "prompt": prompt_detail,
+                            "stream": False,
+                        },
+                        timeout=5,
+                    )
+                    .json()
+                    .get("response", "")
+                    .strip()
+                    .replace('"', "")
+                )
+            except Exception:
+                traducere_title_list = ""
+                traducere_title_detail = ""
+
+            if not traducere_title_list or len(traducere_title_list) > 50:
+                traducere_title_list = (
+                    f"Lista {spaced_title}" if primary_iso == "ro" else plural_title_en
+                )
+            if not traducere_title_detail or len(traducere_title_detail) > 50:
+                traducere_title_detail = (
+                    f"Detalii {spaced_title}"
+                    if primary_iso == "ro"
+                    else f"{readable_title_en} Details"
+                )
+
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}ListView.title={traducere_title_list}"
             )
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.title={traducere_title_detail}"
+            )
+            # Localized menu title mapping for sidebar link stability
+            target_lines.append(f"{base_package}/menu.{n}.list={traducere_title_list}")
+
+        # --- INTERNAL LINE WRITER WITH STRICT EQUALITY PREFIX MATCHING ---
+        def append_unique(file_path, lines_to_add):
+            existing_content = ""
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    existing_content = f.read()
+
+            with open(file_path, "a", encoding="utf-8") as f:
+                if existing_content and not existing_content.endswith("\n"):
+                    f.write("\n")
+
+                header_written = False
+                for line in lines_to_add:
+                    if "=" not in line:
+                        continue
+                    key = line.split("=")[0].strip()
+
+                    # Exact string layout matching to protect against collisions
+                    if f"{key}=" not in existing_content:
+                        if not header_written:
+                            f.write(
+                                f"\n# Automated localization properties bundle layout for entity: {n}\n"
+                            )
+                            header_written = True
+                        f.write(line + "\n")
+
+        # Execute safe isolated appends
+        append_unique(target_path, target_lines)
+        if locale == "en":
+            append_unique(base_path + "/messages.properties", target_lines)
+
+    print(
+        f"✨ Parametric localization layout for entity '{n}' successfully compiled across available locales!"
+    )
 
 
 # Function for update the menu
@@ -1237,14 +1406,14 @@ JMIX_TRANSLATIONS_MAP = {
     "it": "it",
     "nl": "nl",
     "pt": "pt-br",
-    "pt_br": "pt-br",
+    "pt_BR": "pt-br",
     "ro": "ro",
-    "ro_ro": "ro",
-    "ro_md": "ro",
+    "ro_RO": "ro",
+    "ro_MD": "ro",
     "ru": "ru",
     "tr": "tr",
     "zh": "zh-cn",
-    "zh_cn": "zh-cn",
+    "zh_CN": "zh-cn",
 }
 
 
@@ -1551,11 +1720,27 @@ if __name__ == "__main__":
 
         print(f"Generating Entity {name} from CSV architecture...")
         gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
+
+        # EXTRACTIE PARAMETRICĂ: Citim din entities.csv doar câmpurile acestei entități
+        computed_traits_list = []
+        if os.path.exists("entities.csv"):
+            with open("entities.csv", mode="r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Condiție strictă: dacă rândul aparține entității curente (ex: Step)
+                    if row["entity_name"].strip() == name.strip():
+                        computed_traits_list.append(row["field_name"].strip())
+
+        # Dacă dintr-un motiv oarecare lista iese goală, punem un fallback de siguranță
+        if not computed_traits_list:
+            computed_traits_list = ["name"]
+
+        # ACUM APELĂM FUNCȚIA TRANSMITÂND LISTA REALĂ CALCULATĂ DIN CSV!
         update_messages_entity(
             project_dir=".",
             base_package=COMPANY + "." + PROJECT,
             entity_name=name,
-            traits_list=["status", "completedDate"],
+            traits_list=computed_traits_list,  # 👈 Înlocuim lista hardcodată cu cea parametrică!
         )
         gen_liquibase_changelog_from_csv(name, fields_list, traits)
         if relations_list:
