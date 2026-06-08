@@ -1321,6 +1321,47 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
             # Localized menu title mapping for sidebar link stability
             target_lines.append(f"{base_package}/menu.{n}.list={traducere_title_list}")
 
+        # 2.1 DEDICATED TRANSLATIONS FOR COMPOSITION TITLES IN PARENT UI
+        for rel in relations_list:
+            if rel["type"] == "COMPOSITION_1:N":
+                tgt_lower = rel["target"].lower()  # ex: user
+                f_name = rel["field"]  # ex: steps
+
+                # Generate beautiful English names (e.g., steps -> Steps)
+                readable_title_en = f_name.capitalize()
+                target_lines.append(
+                    f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={readable_title_en}"
+                )
+
+                # Ask translategemma:4b to translate the table title
+                prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_title_en}"
+                try:
+                    traducere_ro = (
+                        requests.post(
+                            "http://localhost:11434/api/generate",
+                            json={
+                                "model": "translategemma:4b",
+                                "prompt": prompt,
+                                "stream": False,
+                            },
+                            timeout=5,
+                        )
+                        .json()
+                        .get("response", "")
+                        .strip()
+                    )
+                except Exception:
+                    traducere_ro = ""
+
+                if not traducere_ro or len(traducere_ro) > 50:
+                    traducere_ro = (
+                        "Corectează-mă"  # Fallback fix for the onboarding project
+                    )
+
+                target_lines.append(
+                    f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={traducere_ro}"
+                )
+
         # --- INTERNAL LINE WRITER WITH STRICT EQUALITY PREFIX MATCHING ---
         def append_unique(file_path, lines_to_add):
             existing_content = ""
