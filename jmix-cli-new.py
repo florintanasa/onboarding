@@ -1321,6 +1321,52 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
             # Localized menu title mapping for sidebar link stability
             target_lines.append(f"{base_package}/menu.{n}.list={traducere_title_list}")
 
+        # 2. GENERATE AND TRANSLATE RELATIONSHIP LABELS (relations.csv)
+        for rel in relations_list:
+            f_name = rel["field"]
+
+            # Separate camelCase with spaces for relationships
+            spaced_name = (
+                "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
+            )
+            readable_en = spaced_name.capitalize()
+            target_lines.append(
+                f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}"
+            )
+
+            prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
+            try:
+                traducere_ro = (
+                    requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": "translategemma:4b",
+                            "prompt": prompt,
+                            "stream": False,
+                        },
+                        timeout=5,
+                    )
+                    .json()
+                    .get("response", "")
+                    .strip()
+                )
+            except Exception:
+                traducere_ro = ""
+
+            lungime_text = len(traducere_ro)
+            if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
+                traducere_ro = readable_en
+
+            target_lines.append(
+                f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}"
+            )
+
+        # We are parsing the entity name (e.g., UserStep -> User step)
+        spaced_title = (
+            "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
+        )
+        readable_title_en = spaced_title.capitalize()  # Now is "User step"
+
         # 2.1 DEDICATED TRANSLATIONS FOR COMPOSITION TITLES IN PARENT UI
         for rel in relations_list:
             if rel["type"] == "COMPOSITION_1:N":
