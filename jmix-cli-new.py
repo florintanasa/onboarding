@@ -1877,15 +1877,10 @@ if __name__ == "__main__":
             print(
                 "👤 [User de Sistem] Se activează infiltrarea chirurgicală a relațiilor..."
             )
-
-            # 1. Citim doar relațiile din relations.csv unde sursa este 'User'
             relations_list = get_relations_from_csv("relations.csv", "User")
 
             if relations_list:
-                # 2. Generăm doar fișierul de relații Liquibase _02_relations (FĂRĂ _01_base)
                 gen_liquibase_relations_changelog("User", relations_list)
-
-                # 3. Injectăm discret câmpurile și metodele în User.java existent
                 inject_relations_into_existing_user(relations_list)
             else:
                 print(
@@ -1904,40 +1899,38 @@ if __name__ == "__main__":
             print(f"Generating Entity {name} from CSV architecture...")
             gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
 
-        # EXTRACTIE PARAMETRICĂ: Citim din entities.csv doar câmpurile acestei entități
-        computed_traits_list = []
-        if os.path.exists("entities.csv"):
-            with open("entities.csv", mode="r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    # Condiție strictă: dacă rândul aparține entității curente (ex: Step)
-                    if row["entity_name"].strip() == name.strip():
-                        computed_traits_list.append(row["field_name"].strip())
+            # EXTRACTIE PARAMETRICĂ: Citim din entities.csv doar câmpurile acestei entități
+            computed_traits_list = []
+            if os.path.exists("entities.csv"):
+                with open("entities.csv", mode="r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Condiție strictă: dacă rândul aparține entității curente (ex: Step)
+                        if row["entity_name"].strip() == name.strip():
+                            computed_traits_list.append(row["field_name"].strip())
 
-        # Dacă dintr-un motiv oarecare lista iese goală, punem un fallback de siguranță
-        if not computed_traits_list:
-            computed_traits_list = ["name"]
+            # Dacă dintr-un motiv oarecare lista iese goală, punem un fallback de siguranță
+            if not computed_traits_list:
+                computed_traits_list = ["name"]
 
-        # ACUM APELĂM FUNCȚIA TRANSMITÂND LISTA REALĂ CALCULATĂ DIN CSV!
-        update_messages_entity(
-            project_dir=".",
-            base_package=COMPANY + "." + PROJECT,
-            entity_name=name,
-            traits_list=computed_traits_list,  # 👈 Înlocuim lista hardcodată cu cea parametrică!
-        )
-        gen_liquibase_changelog_from_csv(name, fields_list, traits)
+            # ACUM APELĂM FUNCȚIA TRANSMITÂND LISTA REALĂ CALCULATĂ DIN CSV!
+            update_messages_entity(
+                project_dir=".",
+                base_package=COMPANY + "." + PROJECT,
+                entity_name=name,
+                traits_list=computed_traits_list,
+            )
+            gen_liquibase_changelog_from_csv(name, fields_list, traits)
         if relations_list:
             gen_liquibase_relations_changelog(name, relations_list)
 
-        elif action == "ui-list":
-            fields_list = get_entities_from_csv("entities.csv", name)
-            relations_list = get_relations_from_csv("relations.csv", name)
-            if not fields_list:
-                print(
-                    f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv"
-                )
+    elif action == "ui-list":
+        fields_list = get_entities_from_csv("entities.csv", name)
+        relations_list = get_relations_from_csv("relations.csv", name)
+        if not fields_list:
+            print(f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv")
             sys.exit(1)
-            gen_list_view_from_csv(name, fields_list, relations_list)
+        gen_list_view_from_csv(name, fields_list, relations_list)
         update_menu(name)
 
     elif action == "ui-detail":
@@ -1948,6 +1941,6 @@ if __name__ == "__main__":
             sys.exit(1)
         gen_detail_view_from_csv(name, fields_list, relations_list)
 
-else:
-    print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
-    sys.exit(1)
+    else:
+        print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
+        sys.exit(1)
