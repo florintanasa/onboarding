@@ -1764,6 +1764,70 @@ def print_cli_help():
     print("-" * 50 + "\n")
 
 
+def inject_relations_into_existing_user(relations_list):
+    # Folosește variabilele tale globale: PROIECT_PATH, company_path, project_name
+    user_java_path = (
+        PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/entity/User.java"
+    )
+
+    if os.path.exists(user_java_path):
+        content = open(user_java_path, "r", encoding="utf-8").read()
+        modified = False
+
+        for rel in relations_list:
+            # Ignorăm relațiile de tip compoziție inversă (1:N) din acest pas SQL,
+            # deoarece ele s-au injectat deja automat când ai rulat entitatea copil (ex: UserStep)
+            if rel["type"] != "N:1":
+                continue
+
+            f_name = rel["field"]  # ex: department
+            tgt_class = rel["target"]  # ex: Department
+
+            # Plasa de siguranță: prevenim duplicarea proprietății
+            if f"private {tgt_class} {f_name};" not in content:
+                print(f"   -> Injectare proprietate @ManyToOne '{f_name}' în User.java")
+
+                # Construim adnotările și câmpul Java
+                sql_col = f"{f_name.upper()}_ID"
+
+                # Adăugăm și @NotNull dacă relația este marcată ca obligatorie în CSV
+                validation_anno = ""
+                if rel["mandatory"]:
+                    validation_anno = "    @NotNull\n"
+                    if "import jakarta.validation.constraints.NotNull;" not in content:
+                        content = content.replace(
+                            "public class User",
+                            "import jakarta.validation.constraints.NotNull;\npublic class User",
+                        )
+
+                new_field = f'    @JoinColumn(name = "{sql_col}")\n{validation_anno}    @ManyToOne(fetch = FetchType.LAZY)\n    private {tgt_class} {f_name};\n\n'
+
+                # Metodele Getter și Setter specifice
+                f_caps = (
+                    f_name.upper() + f_name[1:]
+                    if len(f_name) == 1
+                    else f_name[0].upper() + f_name[1:]
+                )
+                new_methods = f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
+                new_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+                # Injectăm câmpul și metodele chiar înainte de ULTIMA acoladă a fișierului Java
+                last_brace = content.rfind("}")
+                if last_brace != -1:
+                    content = (
+                        content[:last_brace]
+                        + new_field
+                        + new_methods
+                        + content[last_brace:]
+                    )
+                    modified = True
+
+        if modified:
+            with open(user_java_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("✨ [Java] User.java a fost actualizat chirurgical cu noile relații!")
+
+
 if __name__ == "__main__":
     # Verify if the user wants to trigger the project initialization command
     if len(sys.argv) > 1 and sys.argv[1].lower() == "init":
@@ -1808,17 +1872,37 @@ if __name__ == "__main__":
     name = sys.argv[2]  # Ex: Department
 
     if action == "entity":
-        # Fetch data from the normalized files in the CSV files
-        traits = get_traits_from_csv("traits.csv", name)
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
+        # Verificăm dacă entitatea curentă este utilizatorul de sistem Jmix
+        if name == "User":
+            print(
+                "👤 [User de Sistem] Se activează infiltrarea chirurgicală a relațiilor..."
+            )
 
-        if not fields_list:
-            print(f" ⚠ No fields found for the entity '{name}' in entities.csv")
-            sys.exit(1)
+            # 1. Citim doar relațiile din relations.csv unde sursa este 'User'
+            relations_list = get_relations_from_csv("relations.csv", "User")
 
-        print(f"Generating Entity {name} from CSV architecture...")
-        gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
+            if relations_list:
+                # 2. Generăm doar fișierul de relații Liquibase _02_relations (FĂRĂ _01_base)
+                gen_liquibase_relations_changelog("User", relations_list)
+
+                # 3. Injectăm discret câmpurile și metodele în User.java existent
+                inject_relations_into_existing_user(relations_list)
+            else:
+                print(
+                    "   -> Nu s-au găsit relații configurate pentru User în relations.csv."
+                )
+        else:
+            # Fetch data from the normalized files in the CSV files
+            traits = get_traits_from_csv("traits.csv", name)
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
+
+            if not fields_list:
+                print(f" ⚠ No fields found for the entity '{name}' in entities.csv")
+                sys.exit(1)
+
+            print(f"Generating Entity {name} from CSV architecture...")
+            gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
 
         # EXTRACTIE PARAMETRICĂ: Citim din entities.csv doar câmpurile acestei entități
         computed_traits_list = []
@@ -1845,13 +1929,15 @@ if __name__ == "__main__":
         if relations_list:
             gen_liquibase_relations_changelog(name, relations_list)
 
-    elif action == "ui-list":
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
-        if not fields_list:
-            print(f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv")
+        elif action == "ui-list":
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
+            if not fields_list:
+                print(
+                    f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv"
+                )
             sys.exit(1)
-        gen_list_view_from_csv(name, fields_list, relations_list)
+            gen_list_view_from_csv(name, fields_list, relations_list)
         update_menu(name)
 
     elif action == "ui-detail":
@@ -1862,6 +1948,6 @@ if __name__ == "__main__":
             sys.exit(1)
         gen_detail_view_from_csv(name, fields_list, relations_list)
 
-    else:
-        print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
-        sys.exit(1)
+else:
+    print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
+    sys.exit(1)
