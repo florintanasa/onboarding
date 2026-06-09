@@ -36,7 +36,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import requests
+# import requests
 
 # Load proiect path in variable PROIECT_PATH
 PROIECT_PATH = str(Path.cwd())
