@@ -1203,42 +1203,44 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
                 )
             else:
                 # Optimized conversational translation prompt for human-like outputs (No shouting text!)
-                prompt = (
-                    f"You are a professional software translator. Translate this UI label "
-                    f"from English into {lang_name}. Return ONLY the natural translation, "
-                    f"properly capitalized, without any quotes or punctuation. Label: {readable_en}"
-                )
-                try:
-                    traducere_lang = (
-                        requests.post(
-                            "http://localhost:11434/api/generate",
-                            json={
-                                "model": "translategemma:4b",
-                                "prompt": prompt,
-                                "stream": False,
-                            },
-                            timeout=5,
-                        )
-                        .json()
-                        .get("response", "")
-                        .strip()
-                    )
-                except Exception:
-                    traducere_lang = ""
+                #                prompt = (
+                #                    f"You are a professional software translator. Translate this UI label "
+                #                    f"from English into {lang_name}. Return ONLY the natural translation, "
+                #                    f"properly capitalized, without any quotes or punctuation. Label: {readable_en}"
+                #                )
+                #                try:
+                #                    traducere_lang = (
+                #                        requests.post(
+                #                            "http://localhost:11434/api/generate",
+                #                            json={
+                #                                "model": "translategemma:4b",
+                #                                "prompt": prompt,
+                #                                "stream": False,
+                #                            },
+                #                            timeout=5,
+                #                        )
+                #                        .json()
+                #                        .get("response", "")
+                #                        .strip()
+                #                    )
+                #                except Exception:
+                #                    traducere_lang = ""
 
                 # Cleanup residual markdown quotes or dots from LLM
-                traducere_lang = (
-                    traducere_lang.replace('"', "")
-                    .replace("'", "")
-                    .replace(".", "")
-                    .strip()
-                )
-                if (
-                    not traducere_lang
-                    or "Error" in traducere_lang
-                    or len(traducere_lang) > 50
-                ):
-                    traducere_lang = readable_en
+                #                traducere_lang = (
+                #                    traducere_lang.replace('"', "")
+                #                    .replace("'", "")
+                #                    .replace(".", "")
+                #                    .strip()
+                #                )
+                #                if (
+                #                    not traducere_lang
+                #                    or "Error" in traducere_lang
+                #                    or len(traducere_lang) > 50
+                #                ):
+                #                    traducere_lang = readable_en
+
+                traducere_lang = ask_ollama_translation(readable_en, lang_name)
 
                 target_lines.append(
                     f"{base_package}.entity/{n}.{trait}={traducere_lang}"
@@ -1264,47 +1266,52 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
             # Menu item injection matching menu.xml layout rules
             target_lines.append(f"{base_package}/menu.{n}.list={plural_title_en}")
         else:
-            prompt_list = f"Translate this software menu title to {lang_name}. Output ONLY the raw translation, capitalized and without your comments. Text: {plural_title_en}"
-            prompt_detail = f"Translate this software view title to {lang_name}. Output ONLY the raw translation, capitalized and without your comments. Text: {readable_title_en} Details"
-            try:
-                traducere_title_list = (
-                    requests.post(
-                        "http://localhost:11434/api/generate",
-                        json={
-                            "model": "translategemma:4b",
-                            "prompt": prompt_list,
-                            "stream": False,
-                        },
-                        timeout=5,
-                    )
-                    .json()
-                    .get("response", "")
-                    .strip()
-                    .replace('"', "")
-                )
-                traducere_title_detail = (
-                    requests.post(
-                        "http://localhost:11434/api/generate",
-                        json={
-                            "model": "translategemma:4b",
-                            "prompt": prompt_detail,
-                            "stream": False,
-                        },
-                        timeout=5,
-                    )
-                    .json()
-                    .get("response", "")
-                    .strip()
-                    .replace('"', "")
-                )
-            except Exception:
-                traducere_title_list = ""
-                traducere_title_detail = ""
+            # prompt_list = f"Translate this software menu title to {lang_name}. Output ONLY the raw translation, capitalized and without your comments. Text: {plural_title_en}"
+            # prompt_detail = f"Translate this software view title to {lang_name}. Output ONLY the raw translation, capitalized and without your comments. Text: {readable_title_en} Details"
+            # try:
+            #    traducere_title_list = (
+            #        requests.post(
+            #            "http://localhost:11434/api/generate",
+            #            json={
+            #                "model": "translategemma:4b",
+            #                "prompt": prompt_list,
+            #                "stream": False,
+            #            },
+            #            timeout=5,
+            #        )
+            #        .json()
+            #        .get("response", "")
+            #        .strip()
+            #        .replace('"', "")
+            #    )
+            #    traducere_title_detail = (
+            #        requests.post(
+            #            "http://localhost:11434/api/generate",
+            #            json={
+            #                "model": "translategemma:4b",
+            #                "prompt": prompt_detail,
+            #                "stream": False,
+            #            },
+            #            timeout=5,
+            #        )
+            #        .json()
+            #        .get("response", "")
+            #        .strip()
+            #        .replace('"', "")
+            #    )
+            # except Exception:
+            #    traducere_title_list = ""
+            #    traducere_title_detail = ""
 
+            traducere_title_list = ask_ollama_translation(plural_title_en, lang_name)
             if not traducere_title_list or len(traducere_title_list) > 50:
                 traducere_title_list = (
                     f"Lista {spaced_title}" if primary_iso == "ro" else plural_title_en
                 )
+
+            traducere_title_detail = ask_ollama_translation(
+                readable_title_en, lang_name
+            )
             if not traducere_title_detail or len(traducere_title_detail) > 50:
                 traducere_title_detail = (
                     f"Detalii {spaced_title}"
@@ -1334,31 +1341,32 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
                 f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}"
             )
 
-            prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
-            try:
-                traducere_ro = (
-                    requests.post(
-                        "http://localhost:11434/api/generate",
-                        json={
-                            "model": "translategemma:4b",
-                            "prompt": prompt,
-                            "stream": False,
-                        },
-                        timeout=5,
-                    )
-                    .json()
-                    .get("response", "")
-                    .strip()
-                )
-            except Exception:
-                traducere_ro = ""
+            # prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
+            # try:
+            #    traducere_ro = (
+            #        requests.post(
+            #            "http://localhost:11434/api/generate",
+            #            json={
+            #                "model": "translategemma:4b",
+            #                "prompt": prompt,
+            #                "stream": False,
+            #            },
+            #            timeout=5,
+            #        )
+            #        .json()
+            #        .get("response", "")
+            #        .strip()
+            #    )
+            # except Exception:
+            #    traducere_ro = ""
 
-            lungime_text = len(traducere_ro)
-            if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
-                traducere_ro = readable_en
+            # lungime_text = len(traducere_ro)
+            # if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
+            #    traducere_ro = readable_en
 
+            translate_label_relation = ask_ollama_translation(readable_en, lang_name)
             target_lines.append(
-                f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}"
+                f"{COMPANY}.{project_name}.entity/{n}.{f_name}={translate_label_relation}"
             )
 
         # We are parsing the entity name (e.g., UserStep -> User step)
@@ -1380,32 +1388,36 @@ def update_messages_entity(project_dir, base_package, entity_name, traits_list):
                 )
 
                 # Ask translategemma:4b to translate the table title
-                prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_title_en}"
-                try:
-                    traducere_ro = (
-                        requests.post(
-                            "http://localhost:11434/api/generate",
-                            json={
-                                "model": "translategemma:4b",
-                                "prompt": prompt,
-                                "stream": False,
-                            },
-                            timeout=5,
-                        )
-                        .json()
-                        .get("response", "")
-                        .strip()
-                    )
-                except Exception:
-                    traducere_ro = ""
+                # prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_title_en}"
+                # try:
+                #    traducere_ro = (
+                #        requests.post(
+                #            "http://localhost:11434/api/generate",
+                #            json={
+                #                "model": "translategemma:4b",
+                #                "prompt": prompt,
+                #                "stream": False,
+                #            },
+                #            timeout=5,
+                #        )
+                #        .json()
+                #        .get("response", "")
+                #        .strip()
+                #    )
+                # except Exception:
+                #    traducere_ro = ""
 
-                if not traducere_ro or len(traducere_ro) > 50:
-                    traducere_ro = (
-                        "Corectează-mă"  # Fallback fix for the onboarding project
-                    )
+                # if not traducere_ro or len(traducere_ro) > 50:
+                #    traducere_ro = (
+                #        "Corectează-mă"  # Fallback fix for the onboarding project
+                #    )
+
+                translate_label_composition = ask_ollama_translation(
+                    readable_title_en, lang_name
+                )
 
                 target_lines.append(
-                    f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={traducere_ro}"
+                    f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={translate_label_composition}"
                 )
 
         # --- INTERNAL LINE WRITER WITH STRICT EQUALITY PREFIX MATCHING ---
