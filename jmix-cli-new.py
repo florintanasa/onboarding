@@ -629,6 +629,8 @@ def gen_liquibase_relations_changelog(name, relations_list):
         # EXCEPTION FOR JMIX: If the target is the "USER" class, the actual SQL table is USER_
         if tgt_table == "USER":
             tgt_table = "USER_"  # Adjust the table name to "USER_"
+        if src_table == "USER":
+            src_table = "USER_"  # Adjust the table name to "USER_"
         # === CASE 1: N:1 Relationship (ManyToOne) ===
         if rel["type"] == "N:1":  # If the relationship type is N:1
             f_name = rel["field"].upper()
