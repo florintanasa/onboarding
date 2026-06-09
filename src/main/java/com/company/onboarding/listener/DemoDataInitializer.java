@@ -1,3 +1,4 @@
+/*
 package com.company.onboarding.listener;
 
 import com.company.onboarding.entity.*;
@@ -88,3 +89,4 @@ public class DemoDataInitializer {
 		dm.save(department);
 	}
 }
+*/
