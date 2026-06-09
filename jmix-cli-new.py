@@ -578,7 +578,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
     current_month = datetime.now().strftime("%m")
     target_dir = (
         PROIECT_PATH
-        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+        + f"/src/main/resources/{company_path}/{project_name}/liquibase/changelog/{current_year}/{current_month}"
     )
     os.makedirs(target_dir, exist_ok=True)
 
@@ -723,7 +723,7 @@ def gen_liquibase_relations_changelog(name, relations_list):
     current_month = datetime.now().strftime("%m")
     target_dir = (
         PROIECT_PATH
-        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+        + f"/src/main/resources/{company_path}/{project_name}/liquibase/changelog/{current_year}/{current_month}"
     )
     os.makedirs(target_dir, exist_ok=True)
 
@@ -823,9 +823,9 @@ public class {name}ListView extends StandardListView<{name}> {{
 """
 
     # Writing to Disk
-    view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
+    view_dir = f"{PROIECT_PATH}/src/main/resources/{company_path}/{project_name}/view/{lower_name}"
     java_dir = (
-        f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
+        f"{PROIECT_PATH}/src/main/java/{company_path}/{project_name}/view/{lower_name}"
     )
     os.makedirs(view_dir, exist_ok=True)
     os.makedirs(java_dir, exist_ok=True)
@@ -931,9 +931,9 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
 }}
 """
 
-    view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
+    view_dir = f"{PROIECT_PATH}/src/main/resources/{company_path}/{project_name}/view/{lower_name}"
     java_dir = (
-        f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
+        f"{PROIECT_PATH}/src/main/java/{company_path}/{project_name}/view/{lower_name}"
     )
     os.makedirs(view_dir, exist_ok=True)
     os.makedirs(java_dir, exist_ok=True)
@@ -957,7 +957,7 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
             # Path to the parent entity's detailed XML file
             tgt_xml_path = (
                 PROIECT_PATH
-                + f"/src/main/resources/com/company/{project_name}/view/{tgt_lower}/{tgt_lower}-detail-view.xml"
+                + f"/src/main/resources/{company_path}/{project_name}/view/{tgt_lower}/{tgt_lower}-detail-view.xml"
             )
 
             if os.path.exists(tgt_xml_path):
