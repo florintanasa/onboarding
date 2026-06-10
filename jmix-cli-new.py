@@ -36,7 +36,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# import requests
+import requests
 
 # Load proiect path in variable PROIECT_PATH
 PROIECT_PATH = str(Path.cwd())
@@ -1767,7 +1767,6 @@ def print_cli_help():
 
 
 def inject_relations_into_existing_user(relations_list):
-    # Folosește variabilele tale globale: PROIECT_PATH, company_path, project_name
     user_java_path = (
         PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/entity/User.java"
     )
@@ -1777,22 +1776,22 @@ def inject_relations_into_existing_user(relations_list):
         modified = False
 
         for rel in relations_list:
-            # Ignorăm relațiile de tip compoziție inversă (1:N) din acest pas SQL,
-            # deoarece ele s-au injectat deja automat când ai rulat entitatea copil (ex: UserStep)
+            # Ignore inverse composition relationships (1:N) in this SQL step,
+            # as they were automatically injected when the child entity (e.g., UserStep) was run
             if rel["type"] != "N:1":
                 continue
 
             f_name = rel["field"]  # ex: department
             tgt_class = rel["target"]  # ex: Department
 
-            # Plasa de siguranță: prevenim duplicarea proprietății
+            # Prevent property duplication
             if f"private {tgt_class} {f_name};" not in content:
                 print(f"   -> Injectare proprietate @ManyToOne '{f_name}' în User.java")
 
-                # Construim adnotările și câmpul Java
+                # Build the annotations and the Java field
                 sql_col = f"{f_name.upper()}_ID"
 
-                # Adăugăm și @NotNull dacă relația este marcată ca obligatorie în CSV
+                # Add @NotNull annotation if the relationship is marked as required in CSV
                 validation_anno = ""
                 if rel["mandatory"]:
                     validation_anno = "    @NotNull\n"
@@ -1804,7 +1803,7 @@ def inject_relations_into_existing_user(relations_list):
 
                 new_field = f'    @JoinColumn(name = "{sql_col}")\n{validation_anno}    @ManyToOne(fetch = FetchType.LAZY)\n    private {tgt_class} {f_name};\n\n'
 
-                # Metodele Getter și Setter specifice
+                # Add specific getter and setter methods
                 f_caps = (
                     f_name.upper() + f_name[1:]
                     if len(f_name) == 1
@@ -1813,7 +1812,7 @@ def inject_relations_into_existing_user(relations_list):
                 new_methods = f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
                 new_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
 
-                # Injectăm câmpul și metodele chiar înainte de ULTIMA acoladă a fișierului Java
+                # Inject the field and methods right before the LAST closing brace of the User.java file
                 last_brace = content.rfind("}")
                 if last_brace != -1:
                     content = (
@@ -1827,7 +1826,131 @@ def inject_relations_into_existing_user(relations_list):
         if modified:
             with open(user_java_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            print("✨ [Java] User.java a fost actualizat chirurgical cu noile relații!")
+            print("✨ [Java] User.java has been updated with the new relationships!")
+
+
+def inject_list_ui_into_existing_user(relations_list):
+    # Determine paths using the standard Jmix architecture layout
+    xml_path = (
+        PROIECT_PATH
+        + f"/src/main/resources/{company_path}/{project_name}/view/user/user-list-view.xml"
+    )
+
+    if os.path.exists(xml_path):
+        xml_content = open(xml_path, "r", encoding="utf-8").read()
+        modified = False
+
+        for rel in relations_list:
+            if rel["type"] != "N:1":
+                continue
+
+            f_name = rel["field"]  # e.g., department
+
+            # 1. Inject the property into the fetchPlan if it exists and is missing
+            if (
+                f'name="{f_name}"' not in xml_content
+                and '<fetchPlan extends="_base">' in xml_content
+            ):
+                print(f"   -> Injecting fetchPlan property for '{f_name}'")
+                fp_prop = (
+                    f'                <property name="{f_name}" fetchPlan="_base"/>\n'
+                )
+                xml_content = xml_content.replace(
+                    '<fetchPlan extends="_base">',
+                    f'<fetchPlan extends="_base">\n{fp_prop}',
+                )
+                modified = True
+
+            # 2. Inject the column inside the dataGrid <columns> tag
+            if (
+                f'property="{f_name}"' not in xml_content
+                and "</columns>" in xml_content
+            ):
+                print(f"   -> Injecting UI column for '{f_name}'")
+                ui_column = f'    <column property="{f_name}"/>\n'
+                xml_content = xml_content.replace(
+                    "</columns>", f"{ui_column}            </columns>"
+                )
+                modified = True
+
+        if modified:
+            with open(xml_path, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+            print("✨ [UI-List] user-list-view.xml successfully updated dynamically!")
+
+
+def inject_detail_ui_into_existing_user(relations_list):
+    xml_path = (
+        PROIECT_PATH
+        + f"/src/main/resources/{company_path}/{project_name}/view/user/user-detail-view.xml"
+    )
+
+    if os.path.exists(xml_path):
+        xml_content = open(xml_path, "r", encoding="utf-8").read()
+
+        accumulated_containers = ""
+        accumulated_components = ""
+        modified = False
+
+        for rel in relations_list:
+            # Clean and normalize the type string to bypass any trailing whitespaces or casing bugs
+            rel_type = rel["type"].strip().upper()
+            if rel_type != "N:1":
+                continue
+
+            f_name = rel["field"].strip()
+            tgt_class = rel["target"].strip()
+            tgt_lower = tgt_class.lower()
+            container_id = f"{tgt_lower}sDc"
+
+            # 1. Build the data collection block safely if it does not exist yet
+            if (
+                f'id="{container_id}"' not in xml_content
+                and f'id="{container_id}"' not in accumulated_containers
+            ):
+                print(f"   -> Preparing data collection container for '{tgt_class}'")
+                c_block = f'        <collection id="{container_id}" class="{COMPANY}.{project_name}.entity.{tgt_class}">\n'
+                c_block += '            <fetchPlan extends="_base"/>\n'
+                c_block += f'            <loader id="{tgt_lower}sDl">\n'
+                c_block += "                <query>\n"
+                c_block += (
+                    f"                    <![CDATA[select e from {tgt_class} e]]>\n"
+                )
+                c_block += "                </query>\n"
+                c_block += "            </loader>\n"
+                c_block += "        </collection>\n"
+                accumulated_containers += c_block
+                modified = True
+
+            # 2. Build the visual combo component block safely if it does not exist yet
+            component_id = f"{f_name}Field"
+            if (
+                f'id="{component_id}"' not in xml_content
+                and f'id="{component_id}"' not in accumulated_components
+            ):
+                print(f"   -> Preparing entityComboBox component for field '{f_name}'")
+                ui_block = f'            <entityComboBox id="{component_id}" property="{f_name}" itemsContainer="{container_id}"/>\n'
+                accumulated_components += ui_block
+                modified = True
+
+        if modified:
+            # Inject data containers right before the closing tag of the data block
+            if accumulated_containers and "</data>" in xml_content:
+                xml_content = xml_content.replace(
+                    "</data>", f"{accumulated_containers}    </data>"
+                )
+
+            # Inject form components right before the closing tag of the formLayout block
+            if accumulated_components and "</formLayout>" in xml_content:
+                xml_content = xml_content.replace(
+                    "</formLayout>", f"{accumulated_components}        </formLayout>"
+                )
+
+            with open(xml_path, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+            print(
+                "✨ [UI-Detail] user-detail-view.xml successfully updated with fields!"
+            )
 
 
 if __name__ == "__main__":
@@ -1874,11 +1997,9 @@ if __name__ == "__main__":
     name = sys.argv[2]  # Ex: Department
 
     if action == "entity":
-        # Verificăm dacă entitatea curentă este utilizatorul de sistem Jmix
+        # Verify if the current entity is the Jmix system user
         if name == "User":
-            print(
-                "👤 [User de Sistem] Se activează infiltrarea chirurgicală a relațiilor..."
-            )
+            print("👤 [System User] Triggering relational infiltration...")
             relations_list = get_relations_from_csv("relations.csv", "User")
 
             if relations_list:
@@ -1886,7 +2007,7 @@ if __name__ == "__main__":
                 inject_relations_into_existing_user(relations_list)
             else:
                 print(
-                    "   -> Nu s-au găsit relații configurate pentru User în relations.csv."
+                    "   -> No relationships were configured for the User in relations.csv."
                 )
         else:
             # Fetch data from the normalized files in the CSV files
@@ -1901,21 +2022,21 @@ if __name__ == "__main__":
             print(f"Generating Entity {name} from CSV architecture...")
             gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
 
-            # EXTRACTIE PARAMETRICĂ: Citim din entities.csv doar câmpurile acestei entități
+            # PARAMETRIC EXTRACTION: We read only the fields of this entity from entities.csv
             computed_traits_list = []
             if os.path.exists("entities.csv"):
                 with open("entities.csv", mode="r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        # Condiție strictă: dacă rândul aparține entității curente (ex: Step)
+                        # Strict condition: if the row belongs to the current entity (e.g., Step)
                         if row["entity_name"].strip() == name.strip():
                             computed_traits_list.append(row["field_name"].strip())
 
-            # Dacă dintr-un motiv oarecare lista iese goală, punem un fallback de siguranță
+            # If for some reason the list is empty, we put a safety fallback
             if not computed_traits_list:
                 computed_traits_list = ["name"]
 
-            # ACUM APELĂM FUNCȚIA TRANSMITÂND LISTA REALĂ CALCULATĂ DIN CSV!
+            # NOW CALLING THE FUNCTION, PASSING THE ACTUAL LIST CALCULATED FROM CSV!
             update_messages_entity(
                 project_dir=".",
                 base_package=COMPANY + "." + PROJECT,
@@ -1927,21 +2048,34 @@ if __name__ == "__main__":
             gen_liquibase_relations_changelog(name, relations_list)
 
     elif action == "ui-list":
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
-        if not fields_list:
-            print(f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv")
-            sys.exit(1)
-        gen_list_view_from_csv(name, fields_list, relations_list)
-        update_menu(name)
+        if name == "User":
+            print("[*] Triggering FlowUI List View infiltration for system User...")
+            relations_list = get_relations_from_csv("relations.csv", "User")
+            inject_list_ui_into_existing_user(relations_list)
+            # Update menu if needed, though Jmix usually includes User view by default
+        else:
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
+            if not fields_list:
+                print(
+                    f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv"
+                )
+                sys.exit(1)
+            gen_list_view_from_csv(name, fields_list, relations_list)
+            update_menu(name)
 
     elif action == "ui-detail":
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
-        if not fields_list:
-            print(f" ⚠ Error: Fields for '{name}' do not exist in entities.csv")
-            sys.exit(1)
-        gen_detail_view_from_csv(name, fields_list, relations_list)
+        if name == "User":
+            print("[*] Triggering FlowUI Detail View infiltration for system User...")
+            relations_list = get_relations_from_csv("relations.csv", "User")
+            inject_detail_ui_into_existing_user(relations_list)
+        else:
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
+            if not fields_list:
+                print(f" ⚠ Error: Fields for '{name}' do not exist in entities.csv")
+                sys.exit(1)
+            gen_detail_view_from_csv(name, fields_list, relations_list)
 
     else:
         print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
