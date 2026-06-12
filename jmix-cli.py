@@ -26,6 +26,8 @@
 # -
 #
 import csv
+import http.client
+import json
 import os
 import re
 import shutil
@@ -33,8 +35,6 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-
-import requests
 
 # Load proiect path in variable PROIECT_PATH
 PROIECT_PATH = str(Path.cwd())
@@ -84,11 +84,11 @@ def get_traits_from_csv(csv_path, target_entity_name):
         "audit_of_modification": True,
         "soft_delete": False,
     }
-    # If not is found the traits.csv return traits default: "versioned": True,"audit_of_creation": True, "audit_of_modification": True, "soft_delete": False,
+    # If not is found the traits.csv return traits default: "versioned": True,"audit_of_creation": True, "audit_of_modification": True, "soft_delete": False
     if not os.path.exists(csv_path):
         return traits
 
-    # Open the traits.csv fiele and return the traits for entity
+    # Open the traits.csv file and return the traits for entity
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -576,7 +576,7 @@ def gen_liquibase_changelog_from_csv(name, fields_list, traits):
     current_month = datetime.now().strftime("%m")
     target_dir = (
         PROIECT_PATH
-        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+        + f"/src/main/resources/{company_path}/{project_name}/liquibase/changelog/{current_year}/{current_month}"
     )
     os.makedirs(target_dir, exist_ok=True)
 
@@ -627,6 +627,8 @@ def gen_liquibase_relations_changelog(name, relations_list):
         # EXCEPTION FOR JMIX: If the target is the "USER" class, the actual SQL table is USER_
         if tgt_table == "USER":
             tgt_table = "USER_"  # Adjust the table name to "USER_"
+        if src_table == "USER":
+            src_table = "USER_"  # Adjust the table name to "USER_"
         # === CASE 1: N:1 Relationship (ManyToOne) ===
         if rel["type"] == "N:1":  # If the relationship type is N:1
             f_name = rel["field"].upper()
@@ -721,7 +723,7 @@ def gen_liquibase_relations_changelog(name, relations_list):
     current_month = datetime.now().strftime("%m")
     target_dir = (
         PROIECT_PATH
-        + f"/src/main/resources/com/company/onboarding/liquibase/changelog/{current_year}/{current_month}"
+        + f"/src/main/resources/{company_path}/{project_name}/liquibase/changelog/{current_year}/{current_month}"
     )
     os.makedirs(target_dir, exist_ok=True)
 
@@ -821,9 +823,9 @@ public class {name}ListView extends StandardListView<{name}> {{
 """
 
     # Writing to Disk
-    view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
+    view_dir = f"{PROIECT_PATH}/src/main/resources/{company_path}/{project_name}/view/{lower_name}"
     java_dir = (
-        f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
+        f"{PROIECT_PATH}/src/main/java/{company_path}/{project_name}/view/{lower_name}"
     )
     os.makedirs(view_dir, exist_ok=True)
     os.makedirs(java_dir, exist_ok=True)
@@ -929,9 +931,9 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
 }}
 """
 
-    view_dir = f"{PROIECT_PATH}/src/main/resources/com/company/{project_name}/view/{lower_name}"
+    view_dir = f"{PROIECT_PATH}/src/main/resources/{company_path}/{project_name}/view/{lower_name}"
     java_dir = (
-        f"{PROIECT_PATH}/src/main/java/com/company/{project_name}/view/{lower_name}"
+        f"{PROIECT_PATH}/src/main/java/{company_path}/{project_name}/view/{lower_name}"
     )
     os.makedirs(view_dir, exist_ok=True)
     os.makedirs(java_dir, exist_ok=True)
@@ -955,7 +957,7 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
             # Path to the parent entity's detailed XML file
             tgt_xml_path = (
                 PROIECT_PATH
-                + f"/src/main/resources/com/company/{project_name}/view/{tgt_lower}/{tgt_lower}-detail-view.xml"
+                + f"/src/main/resources/{company_path}/{project_name}/view/{tgt_lower}/{tgt_lower}-detail-view.xml"
             )
 
             if os.path.exists(tgt_xml_path):
@@ -1028,256 +1030,306 @@ public class {name}DetailView extends StandardDetailView<{name}> {{
                         f.write(xml_tgt_content)
 
 
-# Function to generate messagges in English and to tranlsate in Romanian using Ollama with model translategemma:4b
-def update_messages_entity(n, fields_list, traits, relations_list=[]):
-    print("Generating localization messages for " + n + "...")
+# Function to call local ollama to translate text from English to target language
+def ask_ollama_translation(text_to_translate, target_language_name):
+    """
+    Call the local translategemma:4b model via the native Ollama API
+    to obtain a clean and raw technical translation.
+    """
+    # Construct an ultra-strict prompt to prevent the model from providing explanations
+    prompt = (
+        f"Translate the following software UI label from English into {target_language_name}. "
+        f"Return ONLY the translated string, without quotes, explanations, or introductory text. "
+        f"Label: {text_to_translate}"
+    )
 
-    base_path = PROIECT_PATH + f"/src/main/resources/{company_path}/{project_name}"
-    en_path = base_path + "/messages_en.properties"
-    ro_path = base_path + "/messages_ro.properties"
-
-    en_lines = []
-    ro_lines = []
-
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}={n}")
-    en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
-    ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.id=Id")
-
-    if traits["versioned"]:
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Version")
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.version=Versiune")
-    if traits["audit_of_creation"]:
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Created by")
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Created date")
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdBy=Creat de")
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.createdDate=Data creării")
-    if traits["audit_of_modification"]:
-        en_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Last modified by"
+    try:
+        connection = http.client.HTTPConnection("localhost", 11434, timeout=10)
+        payload = json.dumps(
+            {"model": "translategemma:4b", "prompt": prompt, "stream": False}
         )
-        en_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Last modified date"
-        )
-        ro_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedBy=Modificat de"
-        )
-        ro_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.lastModifiedDate=Data modificării"
-        )
-    if traits["soft_delete"]:
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Deleted by")
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Deleted date")
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.deletedBy=Șters de")
-        ro_lines.append(
-            f"{COMPANY}.{project_name}.entity/{n}.deletedDate=Data ștergerii"
-        )
+        headers = {"Content-Type": "application/json"}
 
-    # 1. GENERATE AND TRANSLATE BUSINESS FIELDS (entities.csv)
-    for field in fields_list:
-        f_name = field["name"]
+        connection.request("POST", "/api/generate", payload, headers)
+        response = connection.getresponse()
 
-        # Separate camelCase with spaces (e.g., dueDate -> due date)
-        spaced_name = (
-            "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
-        )
+        if response.status == 200:
+            data = json.loads(response.read().decode("utf-8"))
+            translated_text = data.get("response", "").strip()
+            # Fallback for cleaning residual text
+            translated_text = translated_text.replace('"', "").replace("'", "")
+            return translated_text if translated_text else text_to_translate
+    except Exception as e:
+        print(f"[-] Ollama translation warning: {e}. Falling back to English.")
 
-        # readable_en is constructed from spaced_name, with only the first letter capitalized!
-        readable_en = spaced_name.capitalize()
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
+    return text_to_translate
 
-        prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
-        try:
-            traducere_ro = (
-                requests.post(
-                    "http://localhost:11434/api/generate",
-                    json={
-                        "model": "translategemma:4b",
-                        "prompt": prompt,
-                        "stream": False,
-                    },
-                    timeout=5,
-                )
-                .json()
-                .get("response", "")
-                .strip()
-            )
-        except Exception:
-            traducere_ro = ""
 
-        lungime_text = len(traducere_ro)
-        if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
-            traducere_ro = readable_en
+# Function to generate messages in all configured languages using Ollama dynamically
+def update_messages_entity(project_dir, base_package, entity_name, traits_list):
+    """
+    Parametric localizer engine. Corrects string-boolean evaluation from traits.csv,
+    injects side menu keys for menu.xml, and stabilizes Ollama text translation responses.
+    """
+    n = entity_name.strip()
+    print(
+        f"Generating dynamic parametric localization messages for exact entity {n}..."
+    )
 
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
+    app_properties_path = project_dir + "/src/main/resources/application.properties"
+    available_locales = ["en"]
 
-    # 2. GENERATE AND TRANSLATE RELATIONSHIP LABELS (relations.csv)
-    for rel in relations_list:
-        f_name = rel["field"]
+    if os.path.exists(app_properties_path):
+        with open(app_properties_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if "jmix.core.available-locales" in line:
+                    match = re.search(r"jmix\.core\.available-locales\s*=\s*(.*)", line)
+                    if match:
+                        available_locales = [
+                            loc.strip()
+                            for loc in match.group(1).split(",")
+                            if loc.strip()
+                        ]
 
-        # Separate camelCase with spaces for relationships
-        spaced_name = (
-            "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
-        )
-        readable_en = spaced_name.capitalize()
-        en_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}")
+    package_path_slashes = base_package.replace(".", "/")
+    base_path = project_dir + f"/src/main/resources/{package_path_slashes}"
 
-        prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_en}"
-        try:
-            traducere_ro = (
-                requests.post(
-                    "http://localhost:11434/api/generate",
-                    json={
-                        "model": "translategemma:4b",
-                        "prompt": prompt,
-                        "stream": False,
-                    },
-                    timeout=5,
-                )
-                .json()
-                .get("response", "")
-                .strip()
-            )
-        except Exception:
-            traducere_ro = ""
-
-        lungime_text = len(traducere_ro)
-        if not traducere_ro or "Error" in traducere_ro or lungime_text > 50:
-            traducere_ro = readable_en
-
-        ro_lines.append(f"{COMPANY}.{project_name}.entity/{n}.{f_name}={traducere_ro}")
-
-    # We are parsing the entity name (e.g., UserStep -> User step)
-    spaced_title = "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
-    readable_title_en = spaced_title.capitalize()  # Now is "User step"
-
-    # 2.1 DEDICATED TRANSLATIONS FOR COMPOSITION TITLES IN PARENT UI
-    for rel in relations_list:
-        if rel["type"] == "COMPOSITION_1:N":
-            tgt_lower = rel["target"].lower()  # ex: user
-            f_name = rel["field"]  # ex: steps
-
-            # Generate beautiful English names (e.g., steps -> Steps)
-            readable_title_en = f_name.capitalize()
-            en_lines.append(
-                f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={readable_title_en}"
-            )
-
-            # Ask translategemma:4b to translate the table title
-            prompt = f"Translate this English field name to Romanian. Return ONLY the translated text capitalized. Source: {readable_title_en}"
-            try:
-                traducere_ro = (
-                    requests.post(
-                        "http://localhost:11434/api/generate",
-                        json={
-                            "model": "translategemma:4b",
-                            "prompt": prompt,
-                            "stream": False,
-                        },
-                        timeout=5,
+    # Read traits config from traits.csv dynamically to fix string-to-boolean evaluation bug
+    entity_traits = {
+        "versioned": False,
+        "audit_of_creation": False,
+        "audit_of_modification": False,
+        "soft_delete": False,
+    }
+    traits_csv_path = project_dir + "/traits.csv"
+    if os.path.exists(traits_csv_path):
+        with open(traits_csv_path, mode="r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("entity_name", "").strip() == n:
+                    # Explicit string evaluation check to fix the boolean override issue
+                    entity_traits["versioned"] = (
+                        row.get("versioned", "").strip().lower() == "true"
                     )
-                    .json()
-                    .get("response", "")
-                    .strip()
-                )
-            except Exception:
-                traducere_ro = ""
+                    entity_traits["audit_of_creation"] = (
+                        row.get("audit_of_creation", "").strip().lower() == "true"
+                    )
+                    entity_traits["audit_of_modification"] = (
+                        row.get("audit_of_modification", "").strip().lower() == "true"
+                    )
+                    entity_traits["soft_delete"] = (
+                        row.get("soft_delete", "").strip().lower() == "true"
+                    )
 
-            if not traducere_ro or len(traducere_ro) > 50:
-                traducere_ro = "Corectează"  # Fallback fix for the onboarding project
-
-            ro_lines.append(
-                f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={traducere_ro}"
-            )
-
-    # 3. TITLES FOR GENERATED UI SCREENS (EN)
-    # Generate the correct plural in English without duplicating the letter "s"
+    # Human readable text conversions
+    spaced_title = "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
+    readable_title_en = spaced_title.capitalize()
     plural_title_en = (
         readable_title_en
         if readable_title_en.endswith("s")
         else f"{readable_title_en}s"
     )
 
-    en_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={plural_title_en}"
-    )
+    for locale in available_locales:
+        if locale == "en":
+            target_path = base_path + "/messages_en.properties"
+            lang_name = "English"
+            primary_iso = "en"
+        else:
+            target_path = base_path + f"/messages_{locale}.properties"
+            iso_lang_names = {
+                "ar": "Arabic",
+                "ckb": "Central Kurdish",
+                "de": "German",
+                "el": "Greek",
+                "es": "Spanish",
+                "fr": "French",
+                "it": "Italian",
+                "nl": "Dutch",
+                "pt": "Brazilian Portuguese",
+                "ro": "Romanian",
+                "ru": "Russian",
+                "tr": "Turkish",
+                "zh": "Simplified Chinese",
+            }
+            primary_iso = locale.split("_")[0].lower()
+            lang_name = iso_lang_names.get(primary_iso, locale)
 
-    en_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={readable_title_en} detail"
-    )
+        target_lines = []
+        target_lines.append(f"{base_package}.entity/{n}={n}")
+        target_lines.append(f"{base_package}.entity/{n}.id=Id")
 
-    # For Romanian, we send the new clean title "readable_en" to translategemma:4b
-    prompt_title_list = f"Translate this English text to Romanian. Output ONLY the translated text capitalized. Text: 'List of {readable_title_en}s'"
-    prompt_title_detail = f"Translate this English text to Romanian. Output ONLY the translated text capitalized. Text: '{readable_title_en} details'"
+        # --- DYNAMIC TRAITS LOCALIZATION (FIXED STRINGS EVALUATION) ---
+        if entity_traits["versioned"]:
+            v_text = "Version" if locale == "en" else "Versiune"
+            target_lines.append(f"{base_package}.entity/{n}.version={v_text}")
 
-    try:
-        traducere_title_list = (
-            requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "translategemma:4b",
-                    "prompt": prompt_title_list,
-                    "stream": False,
-                },
-                timeout=5,
+        if entity_traits["audit_of_creation"]:
+            cb = "Created by" if locale == "en" else "Creat de"
+            cd = "Created date" if locale == "en" else "Data creării"
+            target_lines.append(f"{base_package}.entity/{n}.createdBy={cb}")
+            target_lines.append(f"{base_package}.entity/{n}.createdDate={cd}")
+
+        if entity_traits["audit_of_modification"]:
+            mb = "Last modified by" if locale == "en" else "Modificat de"
+            md = "Last modified date" if locale == "en" else "Data modificării"
+            target_lines.append(f"{base_package}.entity/{n}.lastModifiedBy={mb}")
+            target_lines.append(f"{base_package}.entity/{n}.lastModifiedDate={md}")
+
+        if entity_traits["soft_delete"]:
+            db = "Deleted by" if locale == "en" else "Șters de"
+            dd = "Deleted date" if locale == "en" else "Data ștergerii"
+            target_lines.append(f"{base_package}.entity/{n}.deletedBy={db}")
+            target_lines.append(f"{base_package}.entity/{n}.deletedDate={dd}")
+
+        # --- PROCESS FIELDS AND RELATIONSHIPS ---
+        for trait in traits_list:
+            spaced_name = (
+                "".join([" " + c if c.isupper() else c for c in trait]).strip().lower()
             )
-            .json()
-            .get("response", "")
-            .strip()
-        )
-        traducere_title_detail = (
-            requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "translategemma:4b",
-                    "prompt": prompt_title_detail,
-                    "stream": False,
-                },
-                timeout=5,
+            readable_en = spaced_name.capitalize()
+
+            if locale == "en":
+                # Write English without calling Ollama to prevent model distortions
+                target_lines.append(f"{base_package}.entity/{n}.{trait}={readable_en}")
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.{trait}Field={readable_en}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.{trait}Column={readable_en}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.dataGrid.{trait}={readable_en}"
+                )
+            else:
+                traducere_lang = ask_ollama_translation(readable_en, lang_name)
+
+                target_lines.append(
+                    f"{base_package}.entity/{n}.{trait}={traducere_lang}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.{trait}Field={traducere_lang}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.{trait}Column={traducere_lang}"
+                )
+                target_lines.append(
+                    f"{base_package}.view.{n.lower()}/{n.lower()}ListView.dataGrid.{trait}={traducere_lang}"
+                )
+
+        # --- VIEW TITLES AND SIDEBAR MENUS CONFIGURATION (FIXED FOR menu.xml) ---
+        if locale == "en":
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}ListView.title={plural_title_en}"
             )
-            .json()
-            .get("response", "")
-            .strip()
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.title={readable_title_en} Details"
+            )
+            # Menu item injection matching menu.xml layout rules
+            target_lines.append(f"{base_package}/menu.{n}.list={plural_title_en}")
+        else:
+            traducere_title_list = ask_ollama_translation(plural_title_en, lang_name)
+            if not traducere_title_list or len(traducere_title_list) > 50:
+                traducere_title_list = (
+                    f"Lista {spaced_title}" if primary_iso == "ro" else plural_title_en
+                )
+
+            traducere_title_detail = ask_ollama_translation(
+                readable_title_en, lang_name
+            )
+            if not traducere_title_detail or len(traducere_title_detail) > 50:
+                traducere_title_detail = (
+                    f"Detalii {spaced_title}"
+                    if primary_iso == "ro"
+                    else f"{readable_title_en} Details"
+                )
+
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}ListView.title={traducere_title_list}"
+            )
+            target_lines.append(
+                f"{base_package}.view.{n.lower()}/{n.lower()}DetailView.title={traducere_title_detail}"
+            )
+            # Localized menu title mapping for sidebar link stability
+            target_lines.append(f"{base_package}/menu.{n}.list={traducere_title_list}")
+
+        # 2. GENERATE AND TRANSLATE RELATIONSHIP LABELS (relations.csv)
+        for rel in relations_list:
+            f_name = rel["field"]
+
+            # Separate camelCase with spaces for relationships
+            spaced_name = (
+                "".join([" " + c if c.isupper() else c for c in f_name]).strip().lower()
+            )
+            readable_en = spaced_name.capitalize()
+            target_lines.append(
+                f"{COMPANY}.{project_name}.entity/{n}.{f_name}={readable_en}"
+            )
+
+            translate_label_relation = ask_ollama_translation(readable_en, lang_name)
+            target_lines.append(
+                f"{COMPANY}.{project_name}.entity/{n}.{f_name}={translate_label_relation}"
+            )
+
+        # We are parsing the entity name (e.g., UserStep -> User step)
+        spaced_title = (
+            "".join([" " + c if c.isupper() else c for c in n]).strip().lower()
         )
-    except Exception:
-        traducere_title_list = ""
-        traducere_title_detail = ""
+        readable_title_en = spaced_title.capitalize()  # Now is "User step"
 
-    # Clear fallback mechanisms if the model fails or returns overly long text
-    if not traducere_title_list or len(traducere_title_list) > 50:
-        traducere_title_list = f"Lista {readable_title_en}"
-    if not traducere_title_detail or len(traducere_title_detail) > 50:
-        traducere_title_detail = f"Detalii {readable_title_en}"
+        # 2.1 DEDICATED TRANSLATIONS FOR COMPOSITION TITLES IN PARENT UI
+        for rel in relations_list:
+            if rel["type"] == "COMPOSITION_1:N":
+                tgt_lower = rel["target"].lower()  # ex: user
+                f_name = rel["field"]  # ex: steps
 
-    # TITLES FOR GENERATED UI SCREENS (RO)
-    ro_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}ListView.title={traducere_title_list}"
-    )
-    ro_lines.append(
-        f"{COMPANY}.{project_name}.view.{n.lower()}/{n.lower()}DetailView.title={traducere_title_detail}"
-    )
+                # Generate beautiful English names (e.g., steps -> Steps)
+                readable_title_en = f_name.capitalize()
+                target_lines.append(
+                    f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={readable_title_en}"
+                )
 
-    # 4. The internal function that adds unique lines
-    def append_unique(file_path, lines_to_add):
-        existing_content = ""
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                existing_content = f.read()
+                translate_label_composition = ask_ollama_translation(
+                    readable_title_en, lang_name
+                )
 
-        with open(file_path, "a", encoding="utf-8") as f:
-            if existing_content and not existing_content.endswith("\n"):
-                f.write("\n")
-            for line in lines_to_add:
-                key = line.split("=")[0]
-                if key not in existing_content:
-                    f.write(line + "\n")
+                target_lines.append(
+                    f"{COMPANY}.{project_name}.view.{tgt_lower}/{tgt_lower}DetailView.{f_name}={translate_label_composition}"
+                )
 
-    append_unique(en_path, en_lines)
-    append_unique(ro_path, ro_lines)
+        # --- INTERNAL LINE WRITER WITH STRICT EQUALITY PREFIX MATCHING ---
+        def append_unique(file_path, lines_to_add):
+            existing_content = ""
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    existing_content = f.read()
+
+            with open(file_path, "a", encoding="utf-8") as f:
+                if existing_content and not existing_content.endswith("\n"):
+                    f.write("\n")
+
+                header_written = False
+                for line in lines_to_add:
+                    if "=" not in line:
+                        continue
+                    key = line.split("=")[0].strip()
+
+                    # Exact string layout matching to protect against collisions
+                    if f"{key}=" not in existing_content:
+                        if not header_written:
+                            f.write(
+                                f"\n# Automated localization properties bundle layout for entity: {n}\n"
+                            )
+                            header_written = True
+                        f.write(line + "\n")
+
+        # Execute safe isolated appends
+        append_unique(target_path, target_lines)
+        if locale == "en":
+            append_unique(base_path + "/messages.properties", target_lines)
+
     print(
-        "✨ Localization in English and Romanian for the entity "
-        + n
-        + " successfully injected!"
+        f"✨ Parametric localization layout for entity '{n}' successfully compiled across available locales!"
     )
 
 
@@ -1315,57 +1367,84 @@ def update_menu(n):
 
 
 # ==============================================================================
-# SUB-SISTEM COMMANDE INIT (Independent CLI - stil cuba-cli)
+# SUB-SISTEM COMMANDE INIT (Independent CLI - like cuba-cli)
 # ==============================================================================
 
+# Universal mapping dictionary from user input to official Jmix translation add-ons
+JMIX_TRANSLATIONS_MAP = {
+    "ar": "ar",
+    "ckb": "ckb",
+    "de": "de",
+    "el": "el",
+    "es": "es",
+    "fr": "fr",
+    "fr_fr": "fr",
+    "it": "it",
+    "nl": "nl",
+    "pt": "pt-br",
+    "pt_BR": "pt-br",
+    "ro": "ro",
+    "ro_RO": "ro",
+    "ro_MD": "ro",
+    "ru": "ru",
+    "tr": "tr",
+    "zh": "zh-cn",
+    "zh_CN": "zh-cn",
+}
 
-def cmd_init_project(project_name, target_group):
+
+# Function to initializes a new Jmix project
+def cmd_init_project(project_name, target_group, lang_input="en"):
     """
-    Download the Jmix 2.x template and completely reconfigure directories,
-    Java packages, XML resources, Liquibase, and localized translations.
-    Dynamically calculate the base package by concatenation.
+    Initializes a new Jmix project by cloning the official starter template,
+    automatically calculating the base package, injecting localization add-ons,
+    and handling structural directory refactoring.
     """
-    # Automatically calculate base_package (e.g., com.company + onboarding = com.company.onboarding)
+    # Automatically calculate base package (e.g., com.florin.onboarding)
     base_package = (
         f"{target_group.strip().strip('.')}.{project_name.strip().strip('.')}"
     )
-
     repo_url = "https://github.com/jmix-framework/jmix-ai-template"
     current_dir = os.getcwd()
     target_dir = os.path.join(current_dir, project_name)
 
-    print(f"\n[*] New Jmix Project Initialization: '{project_name}'")
-    print(f"[*] Group ID (Target):         {target_group}")
-    print(f"[*] Generated Base Package:  {base_package}")
+    # Keep the exact casing for file names and properties (e.g., ro_RO, ro_MD)
+    lang_suffix = lang_input.strip()
+    lang_key_for_map = lang_suffix.lower()
+
+    print(f"\n[*] Initializing New Jmix Project: '{project_name}'")
+    print(f"[*] Group ID:                 {target_group}")
+    print(f"[*] Generated Base Package:   {base_package}")
+    print(f"[*] Requested Locale:         {lang_suffix}")
     print("-" * 60)
 
     if os.path.exists(target_dir):
         print(
-            f"[-] Critical Error: The '{project_name}' folder already exists in this directory."
+            f"[-] Critical Error: Folder '{project_name}' already exists in this directory."
         )
         sys.exit(1)
 
-    print("[*] Step 1: Download the official modern Jmix template...")
+    print("[*] Step 1: Downloading official Jmix starter template...")
     try:
         subprocess.run(
             ["git", "clone", "--depth", "1", repo_url, project_name], check=True
         )
     except Exception as e:
-        print(f"[-] Error executing the Git clone command: {e}")
+        print(f"[-] Critical Error executing Git clone: {e}")
         sys.exit(1)
 
-    # Remove the Git history of the template for a clean repository
+    # Remove template git history for a clean slate repository
     shutil.rmtree(os.path.join(target_dir, ".git"), ignore_errors=True)
-    print("[+] Git history of the template has been cleaned.")
+    print("[+] Git template history cleared successfully.")
 
-    # Define the incorrect package variation from the official Jmix template (Fix 'template' typo)
+    # Define old package paths (Jmix template typos) vs new packages
     old_package_dots = "io.jmix.tempate"
     old_package_slashes = "io/jmix/tempate"
 
     new_package_slashes = os.path.join(*base_package.split("."))
     new_package_property_slashes = base_package.replace(".", "/")
 
-    # Physical layers that require moving to disk
+    # Define project layer matrix for physical refactoring
     paths_to_move = [
         (
             os.path.join(target_dir, "src", "main", "java"),
@@ -1384,7 +1463,7 @@ def cmd_init_project(project_name, target_group):
         ),
     ]
 
-    print("[*] Step 2: Refactoring structural Java layers and XML resources...")
+    print("[*] Step 2: Refactoring structural Java source layers and XML resources...")
     for base_root, old_rel, new_rel in paths_to_move:
         src_dir = os.path.join(base_root, old_rel)
         dst_dir = os.path.join(base_root, new_rel)
@@ -1393,19 +1472,123 @@ def cmd_init_project(project_name, target_group):
             os.makedirs(dst_dir, exist_ok=True)
             for item in os.listdir(src_dir):
                 shutil.move(os.path.join(src_dir, item), os.path.join(dst_dir, item))
-            # Clean up empty parent folders from the io/jmix hierarchy
+            # Clean up empty parent directories left behind (io/jmix/tempate hierarchy)
             shutil.rmtree(os.path.join(base_root, "io"), ignore_errors=True)
 
     print(
-        "[*] Step 3: Rewriting text from metadata (Gradle, Spring, Liquibase, Translations)..."
+        "[*] Step 3: Injecting metadata and localization configuration dependencies..."
     )
-    files_to_update = [
-        os.path.join(target_dir, "build.gradle"),
-        os.path.join(target_dir, "settings.gradle"),
-        os.path.join(target_dir, "src", "main", "resources", "application.properties"),
-    ]
 
-    # Dynamically scan moved files to add them to the search & replace text pipeline
+    build_gradle_path = os.path.join(target_dir, "build.gradle")
+    app_properties_path = os.path.join(
+        target_dir, "src", "main", "resources", "application.properties"
+    )
+
+    # --- DEPENDENCY INJECTION IN BUILD.GRADLE ---
+    if os.path.exists(build_gradle_path):
+        with open(build_gradle_path, "r", encoding="utf-8") as f:
+            gradle_content = f.read()
+
+        # Update group metadata
+        gradle_content = re.sub(
+            r"group\s*=\s*['\"].*?['\"]", f"group = '{target_group}'", gradle_content
+        )
+
+        # Inject translation add-on if the locale is not default English
+        if lang_key_for_map != "en" and lang_key_for_map in JMIX_TRANSLATIONS_MAP:
+            addon_suffix = JMIX_TRANSLATIONS_MAP[lang_key_for_map]
+            addon_dependency = f"\n    implementation 'io.jmix.translations:jmix-translations-{addon_suffix}'"
+
+            if "dependencies {" in gradle_content:
+                gradle_content = gradle_content.replace(
+                    "dependencies {",
+                    f"dependencies {{{addon_dependency} // Automatically configured via Jmix CLI",
+                )
+                print(
+                    f"[+] Injected localization add-on dependency: jmix-translations-{addon_suffix}"
+                )
+
+        with open(build_gradle_path, "w", encoding="utf-8") as f:
+            f.write(gradle_content)
+
+    # --- AVAILABLE LOCALES CONFIGURATION IN APPLICATION.PROPERTIES ---
+    if os.path.exists(app_properties_path):
+        with open(app_properties_path, "r", encoding="utf-8") as f:
+            prop_content = f.read()
+
+        if "jmix.core.available-locales" in prop_content:
+            if lang_key_for_map != "en":
+                # Dynamically append the exact requested locale string (e.g., en,ro_RO)
+                prop_content = re.sub(
+                    r"jmix\.core\.available-locales\s*=\s*(.*)",
+                    f"jmix.core.available-locales = \\1,{lang_suffix}",
+                    prop_content,
+                )
+                print(f"[+] Updated active core locales property: en,{lang_suffix}")
+        else:
+            locales_line = "\njmix.core.available-locales = en"
+            if lang_key_for_map != "en":
+                locales_line += f",{lang_suffix}"
+            prop_content += locales_line
+
+        with open(app_properties_path, "w", encoding="utf-8") as f:
+            f.write(prop_content)
+
+    # --- INITIALIZATION OF DYNAMIC PROJECT MESSAGES FILE WITH FALLBACK COPY ---
+    if lang_key_for_map != "en":
+        msg_dir = os.path.join(
+            target_dir, "src", "main", "resources", new_package_slashes
+        )
+        os.makedirs(msg_dir, exist_ok=True)
+
+        # The exact filename present in the official Jmix template repository
+        template_eng_msg_path = os.path.join(msg_dir, "messages_en.properties")
+
+        # Standard Spring Boot fallback properties file path
+        base_fallback_msg_path = os.path.join(msg_dir, "messages.properties")
+
+        # Target bilingual file requested by user (e.g., messages_ro_RO.properties)
+        custom_messages_path = os.path.join(
+            msg_dir, f"messages_{lang_suffix}.properties"
+        )
+
+        # 1. Create the standard messages.properties if it doesn't exist yet as a fallback copy
+        if os.path.exists(template_eng_msg_path) and not os.path.exists(
+            base_fallback_msg_path
+        ):
+            shutil.copy2(template_eng_msg_path, base_fallback_msg_path)
+            print("[+] Generated standard base fallback file: messages.properties")
+
+        # 2. Duplicate the English template content straight into your localized twin bundle
+        if not os.path.exists(custom_messages_path):
+            if os.path.exists(template_eng_msg_path):
+                # Copy the entire clean Jmix translation structure
+                shutil.copy2(template_eng_msg_path, custom_messages_path)
+
+                # Add a traceable header metadata comment at the first line of the properties file
+                with open(custom_messages_path, "r+", encoding="utf-8") as f:
+                    content = f.read()
+                    f.seek(0, 0)
+                    f.write(
+                        f"# Automatically initialized as a bilingual twin for: {lang_suffix}\n"
+                        + content
+                    )
+
+                print(
+                    f"[+] Created localized bundle twin with English base: messages_{lang_suffix}.properties"
+                )
+            else:
+                # Absolute safety scythe fallback execution string path block
+                with open(custom_messages_path, "w", encoding="utf-8") as f:
+                    f.write(
+                        f"# Custom localization translations properties file for: {lang_suffix}\n"
+                    )
+                print(
+                    f"[+] Initialized empty bundle (messages_en.properties was missing): messages_{lang_suffix}.properties"
+                )
+
+    # Global text search & replace refactoring execution loop
+    files_to_update = [os.path.join(target_dir, "settings.gradle"), app_properties_path]
     for base_root, _, new_rel in paths_to_move:
         scan_root = os.path.join(base_root, new_rel)
         if os.path.exists(scan_root):
@@ -1415,17 +1598,12 @@ def cmd_init_project(project_name, target_group):
                         files_to_update.append(os.path.join(root, file))
 
     for file_path in files_to_update:
+        if file_path == build_gradle_path:
+            continue  # already processed above granularly
         if not os.path.exists(file_path):
             continue
-
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-
-        # Rewrite project parameters in Gradle
-        if "build.gradle" in file_path:
-            content = re.sub(
-                r"group\s*=\s*['\"].*?['\"]", f"group = '{target_group}'", content
-            )
         if "settings.gradle" in file_path:
             content = re.sub(
                 r"rootProject\.name\s*=\s*['\"].*?['\"]",
@@ -1433,113 +1611,515 @@ def cmd_init_project(project_name, target_group):
                 content,
             )
 
-        # Correct packages with dots and slashes (Liquibase changelog + MessageSourceBasenames)
+        # Replace dot and slash variations across configs, java sources, changelogs, and views
         content = content.replace(old_package_dots, base_package)
         content = content.replace(old_package_slashes, new_package_property_slashes)
-
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-    print("[*] Step 4: Apply Unix execution permissions for the Gradle Wrapper...")
+    # Enforce native Gradle Wrapper execution permissions
     gradlew_path = os.path.join(target_dir, "gradlew")
     if os.path.exists(gradlew_path):
-        try:
-            os.chmod(gradlew_path, 0o755)
-            print("[+] The 'chmod +x' permission has been applied successfully.")
-        except Exception as e:
-            print(f"[-] NOTE permissions for gradlew: {e}")
+        os.chmod(gradlew_path, 0o755)
 
     print("\n" + "=" * 60)
-    print(f"[+] PROJECT SUCCESSFULLY INITIALIZED: {project_name}")
-    print(f"[+] Run: mv jmix-cli {project_name}/ # for continue the project")
-    print(f"[+] Run: cd {project_name} && ./gradlew bootRun # to test")
+    print(f"[+] SUCCESS: Jmix project '{project_name}' successfully initialized!")
+    print(f"[+] Target core locale: {lang_suffix}")
+    print(f"[+] Run command: cd {project_name} && ./gradlew bootRun")
     print("=" * 60 + "\n")
 
 
+# Function to diplay the help
 def print_cli_help():
-    """Display the user manual for your new CLI"""
-    print("\n🚀 JMIX CLI - COMBINED COMMAND HELP")
+    """Displays CLI command user manual documentation."""
+    print("\n🚀 JMIX CLI - UNIFIED COMMAND HELP")
     print("-" * 50)
-    print("Usage instructions for initializing a new project:")
-    print("  python jmix-cli.py init <project_name> <target_group>")
-    print("  -> Example: python jmix-cli.py onboarding com.company")
-    print("\nUsage instructions for generation (existing project):")
-    print("  Run with next parameters inside a valid Jmix folder project")
-    print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
-    print("  to process the traits.csv, entities.csv and relations.csv files.")
+    print("Initialize a new clean standard Jmix template:")
+    print("  python jmix-cli.py init <project_name> <target_group> [locale]")
+    print("  -> Example: python jmix-cli.py init onboarding com.florin ro_RO")
+    print("\nGenerate layers from CSV schema (existing engine):")
+    print("  Run without parameters inside a valid Jmix directory hierarchy")
+    print("  to process traits.csv, entities.csv, and relations.csv schemas.")
     print("-" * 50 + "\n")
 
 
+# Function to inject in existing User class
+def inject_relations_into_existing_user(relations_list):
+    user_java_path = (
+        PROIECT_PATH + f"/src/main/java/{company_path}/{project_name}/entity/User.java"
+    )
+
+    if os.path.exists(user_java_path):
+        content = open(user_java_path, "r", encoding="utf-8").read()
+        modified = False
+
+        for rel in relations_list:
+            # Ignore inverse composition relationships (1:N) in this SQL step,
+            # as they were automatically injected when the child entity (e.g., UserStep) was run
+            if rel["type"] != "N:1":
+                continue
+
+            f_name = rel["field"]  # ex: department
+            tgt_class = rel["target"]  # ex: Department
+
+            # Prevent property duplication
+            if f"private {tgt_class} {f_name};" not in content:
+                print(f"   -> Injectare proprietate @ManyToOne '{f_name}' în User.java")
+
+                # Build the annotations and the Java field
+                sql_col = f"{f_name.upper()}_ID"
+
+                # Add @NotNull annotation if the relationship is marked as required in CSV
+                validation_anno = ""
+                if rel["mandatory"]:
+                    validation_anno = "    @NotNull\n"
+                    if "import jakarta.validation.constraints.NotNull;" not in content:
+                        content = content.replace(
+                            "public class User",
+                            "import jakarta.validation.constraints.NotNull;\npublic class User",
+                        )
+
+                new_field = f'    @JoinColumn(name = "{sql_col}")\n{validation_anno}    @ManyToOne(fetch = FetchType.LAZY)\n    private {tgt_class} {f_name};\n\n'
+
+                # Add specific getter and setter methods
+                f_caps = (
+                    f_name.upper() + f_name[1:]
+                    if len(f_name) == 1
+                    else f_name[0].upper() + f_name[1:]
+                )
+                new_methods = f"    public {tgt_class} get{f_caps}() {{\n        return {f_name};\n    }}\n\n"
+                new_methods += f"    public void set{f_caps}({tgt_class} {f_name}) {{\n        this.{f_name} = {f_name};\n    }}\n\n"
+
+                # Inject the field and methods right before the LAST closing brace of the User.java file
+                last_brace = content.rfind("}")
+                if last_brace != -1:
+                    content = (
+                        content[:last_brace]
+                        + new_field
+                        + new_methods
+                        + content[last_brace:]
+                    )
+                    modified = True
+
+        if modified:
+            with open(user_java_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("✨ [Java] User.java has been updated with the new relationships!")
+
+
+# Function to inject into user-list-view.xml
+def inject_list_ui_into_existing_user(relations_list):
+    # Determine paths using the standard Jmix architecture layout
+    xml_path = (
+        PROIECT_PATH
+        + f"/src/main/resources/{company_path}/{project_name}/view/user/user-list-view.xml"
+    )
+
+    if os.path.exists(xml_path):
+        xml_content = open(xml_path, "r", encoding="utf-8").read()
+        modified = False
+
+        for rel in relations_list:
+            if rel["type"] != "N:1":
+                continue
+
+            f_name = rel["field"]  # e.g., department
+
+            # 1. Inject the property into the fetchPlan if it exists and is missing
+            if (
+                f'name="{f_name}"' not in xml_content
+                and '<fetchPlan extends="_base">' in xml_content
+            ):
+                print(f"   -> Injecting fetchPlan property for '{f_name}'")
+                fp_prop = (
+                    f'                <property name="{f_name}" fetchPlan="_base"/>\n'
+                )
+                xml_content = xml_content.replace(
+                    '<fetchPlan extends="_base">',
+                    f'<fetchPlan extends="_base">\n{fp_prop}',
+                )
+                modified = True
+
+            # 2. Inject the column inside the dataGrid <columns> tag
+            if (
+                f'property="{f_name}"' not in xml_content
+                and "</columns>" in xml_content
+            ):
+                print(f"   -> Injecting UI column for '{f_name}'")
+                ui_column = f'    <column property="{f_name}"/>\n'
+                xml_content = xml_content.replace(
+                    "</columns>", f"{ui_column}            </columns>"
+                )
+                modified = True
+
+        if modified:
+            with open(xml_path, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+            print("✨ [UI-List] user-list-view.xml successfully updated dynamically!")
+
+
+def inject_detail_ui_into_existing_user(relations_list):
+    xml_path = (
+        PROIECT_PATH
+        + f"/src/main/resources/{company_path}/{project_name}/view/user/user-detail-view.xml"
+    )
+
+    if os.path.exists(xml_path):
+        xml_content = open(xml_path, "r", encoding="utf-8").read()
+
+        accumulated_containers = ""
+        accumulated_components = ""
+        modified = False
+
+        for rel in relations_list:
+            # Clean and normalize the type string to bypass any trailing whitespaces or casing bugs
+            rel_type = rel["type"].strip().upper()
+            if rel_type != "N:1":
+                continue
+
+            f_name = rel["field"].strip()
+            tgt_class = rel["target"].strip()
+            tgt_lower = tgt_class.lower()
+            container_id = f"{tgt_lower}sDc"
+
+            # 1. Build the data collection block safely if it does not exist yet
+            if (
+                f'id="{container_id}"' not in xml_content
+                and f'id="{container_id}"' not in accumulated_containers
+            ):
+                print(f"   -> Preparing data collection container for '{tgt_class}'")
+                c_block = f'        <collection id="{container_id}" class="{COMPANY}.{project_name}.entity.{tgt_class}">\n'
+                c_block += '            <fetchPlan extends="_base"/>\n'
+                c_block += f'            <loader id="{tgt_lower}sDl">\n'
+                c_block += "                <query>\n"
+                c_block += (
+                    f"                    <![CDATA[select e from {tgt_class} e]]>\n"
+                )
+                c_block += "                </query>\n"
+                c_block += "            </loader>\n"
+                c_block += "        </collection>\n"
+                accumulated_containers += c_block
+                modified = True
+
+            # 2. Build the visual combo component block safely if it does not exist yet
+            component_id = f"{f_name}Field"
+            if (
+                f'id="{component_id}"' not in xml_content
+                and f'id="{component_id}"' not in accumulated_components
+            ):
+                print(f"   -> Preparing entityComboBox component for field '{f_name}'")
+                ui_block = f'            <entityComboBox id="{component_id}" property="{f_name}" itemsContainer="{container_id}"/>\n'
+                accumulated_components += ui_block
+                modified = True
+
+        if modified:
+            # Inject data containers right before the closing tag of the data block
+            if accumulated_containers and "</data>" in xml_content:
+                xml_content = xml_content.replace(
+                    "</data>", f"{accumulated_containers}    </data>"
+                )
+
+            # Inject form components right before the closing tag of the formLayout block
+            if accumulated_components and "</formLayout>" in xml_content:
+                xml_content = xml_content.replace(
+                    "</formLayout>", f"{accumulated_components}        </formLayout>"
+                )
+
+            with open(xml_path, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+            print(
+                "✨ [UI-Detail] user-detail-view.xml successfully updated with fields!"
+            )
+
+
+# Function to generate Roles from roles.csv file
+def gen_jmix_resource_roles_from_csv():
+    """
+    Parses roles.csv and aggregates permissions by role code to generate
+    strongly-typed Jmix 2.x ResourceRole interfaces with View, Menu, Entity,
+    and EntityAttribute policies automatically.
+    """
+    roles_file = "roles.csv"
+    if not os.path.exists(roles_file):
+        print(f"[-] Error: {roles_file} configuration file not found.")
+        sys.exit(1)
+
+    # 1. Group rows by their unique role code to build a single file per role
+    roles_data = {}
+    with open(roles_file, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            r_code = row["code"].strip()
+            if r_code not in roles_data:
+                roles_data[r_code] = {
+                    "name": row["name"].strip(),
+                    "code": r_code,
+                    "policies": [],
+                }
+            roles_data[r_code]["policies"].append(row)
+
+    # 2. Iterate through each unique role and generate its interface definition
+    for r_code, r_info in roles_data.items():
+        role_name = r_info["name"]
+
+        # Avoid duplicate "RoleRole" text structure in file mapping names
+        raw_class_name = "".join([part.capitalize() for part in r_code.split("-")])
+        if raw_class_name.endswith("Role"):
+            class_name = raw_class_name
+        else:
+            class_name = raw_class_name + "Role"
+
+        print(f"[*] Compiling Jmix ResourceRole: '{role_name}' -> {class_name}.java")
+
+        # Jmix 2.x native security framework annotations imports tracking
+        java_imports = {
+            "import io.jmix.security.model.SecurityScope;",
+            "import io.jmix.security.role.annotation.ResourceRole;",
+            "import io.jmix.security.role.annotation.EntityPolicy;",
+            "import io.jmix.security.model.EntityPolicyAction;",
+            "import io.jmix.security.role.annotation.EntityAttributePolicy;",
+            "import io.jmix.security.model.EntityAttributePolicyAction;",
+            "import io.jmix.securityflowui.role.annotation.ViewPolicy;",
+            "import io.jmix.securityflowui.role.annotation.MenuPolicy;",
+        }
+
+        java_policies_body = ""
+
+        # 3. Process every individual entity policy row inside this specific role
+        for policy in r_info["policies"]:
+            ent_name = policy["entity_name"].strip()
+
+            # Inject dynamic domain entity import path directly into the collection structure
+            java_imports.add(f"import {COMPANY}.{project_name}.entity.{ent_name};")
+
+            # --- VIEW & MENU POLICIES SECTION ---
+            view_ids = []
+            menu_ids = []
+
+            if policy["ui_list"].strip().lower() == "true":
+                view_ids.append(f'"{ent_name}.list"')
+                menu_ids.append(f'"{ent_name}.list"')
+
+            if policy["ui_detail"].strip().lower() == "true":
+                view_ids.append(f'"{ent_name}.detail"')
+
+            view_policy_annotation = ""
+            if view_ids:
+                ids_str = ", ".join(view_ids)
+                view_policy_annotation = f"    @ViewPolicy(viewIds = {{{ids_str}}})\n"
+
+            menu_policy_annotation = ""
+            if menu_ids:
+                m_ids_str = ", ".join(menu_ids)
+                menu_policy_annotation = f"    @MenuPolicy(menuIds = {{{m_ids_str}}})\n"
+
+            # --- CRUD ENTITY POLICIES SECTION ---
+            crud_actions = []
+            if policy["create"].strip().lower() == "true":
+                crud_actions.append("EntityPolicyAction.CREATE")
+            if policy["read"].strip().lower() == "true":
+                crud_actions.append("EntityPolicyAction.READ")
+            if policy["update"].strip().lower() == "true":
+                crud_actions.append("EntityPolicyAction.UPDATE")
+            if policy["delete"].strip().lower() == "true":
+                crud_actions.append("EntityPolicyAction.DELETE")
+
+            entity_policy_annotation = ""
+            if crud_actions:
+                actions_str = ", ".join(crud_actions)
+                entity_policy_annotation = f"    @EntityPolicy(entityClass = {ent_name}.class, actions = {{{actions_str}}})\n"
+
+            # --- ENTITY ATTRIBUTE POLICIES SECTION ---
+            # Automatically grants access to all attributes using the wildcard "*" format tracker.
+            attr_action = "EntityAttributePolicyAction.VIEW"
+            if (
+                "EntityPolicyAction.CREATE" in crud_actions
+                or "EntityPolicyAction.UPDATE" in crud_actions
+            ):
+                attr_action = "EntityAttributePolicyAction.MODIFY"
+
+            attribute_policy_annotation = f'    @EntityAttributePolicy(entityClass = {ent_name}.class, attributes = "*", action = {attr_action})\n'
+
+            # Combine all four strategic annotations into a single cleanly formatted method block signature
+            # Strictly formatting the method name via precise camelCase index conversion
+            # e.g., "UserStep" -> "user" + "Step" + "Policies" -> "userStepPolicies"
+            method_name = ent_name[0].lower() + ent_name[1:] + "Policies"
+            java_policies_body += f"{view_policy_annotation}{menu_policy_annotation}{entity_policy_annotation}{attribute_policy_annotation}    void {method_name}();\n\n"
+
+        # 4. Synthesize final clean Java blueprint template
+        imports_block = "\n".join(sorted(list(java_imports)))
+
+        java_content = f"""package {COMPANY}.{project_name}.security;
+
+{imports_block}
+
+@ResourceRole(name = "{role_name}", code = "{r_code}", scope = SecurityScope.UI)
+public interface {class_name} {{
+
+{java_policies_body}}}
+"""
+
+        # 5. Safe IO file writing process into correct Jmix structural folder
+        target_dir = os.path.join(
+            PROIECT_PATH, "src", "main", "java", company_path, project_name, "security"
+        )
+        os.makedirs(target_dir, exist_ok=True)
+
+        file_path = os.path.join(target_dir, f"{class_name}.java")
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(java_content)
+
+    print(
+        "✨ [Security] All parametric resource roles with attribute policies generated successfully!"
+    )
+
+
 if __name__ == "__main__":
-    # Check if the user wants to initialize a new project
-    if len(sys.argv) > 1 and sys.argv[1].lower() == "init":
-        if len(sys.argv) < 4:
-            print("[-] Error: Missing required parameters.")
+    # -----------------------------------------------------
+    # 1. Project Initialization & Help Command Interception
+    # -----------------------------------------------------
+    if len(sys.argv) != 1 and sys.argv[1].lower() == "init":
+        if len(sys.argv) == 2 or len(sys.argv) == 3:
+            print("[-] Error: Missing required arguments.")
             print_cli_help()
             sys.exit(1)
 
         p_name = sys.argv[2]
         t_group = sys.argv[3]
-        cmd_init_project(p_name, t_group)
+
+        if len(sys.argv) >= 5:
+            requested_lang = sys.argv[4]
+        else:
+            requested_lang = "en"
+
+        cmd_init_project(p_name, t_group, requested_lang)
         sys.exit(0)
 
-    elif len(sys.argv) > 1 and sys.argv[1].lower() in ["help", "--help", "-h"]:
+    elif len(sys.argv) != 1 and sys.argv[1].lower() in ["help", "--help", "-h"]:
         print_cli_help()
         sys.exit(0)
 
     # -----------------------------------------------------
-    # (Default run in the absence of the 'init' command)
+    # 2. Main Execution Engine & Workspace Validation
     # -----------------------------------------------------
     print(f"[*] Run Jmix CLI engine generation on the current project: '{PROJECT}'...")
 
-    # Perform a safety check to ensure we are in a valid project
     if not PROJECT:
         print("[-] No valid Jmix project detected in this folder.")
         print_cli_help()
         sys.exit(1)
 
-    # Verify the correct number of arguments (script + action + entity name)
-    if len(sys.argv) < 3:
+    if len(sys.argv) == 1:
+        print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail|security] [Name]")
+        sys.exit(1)
+
+    action = sys.argv[1].lower()  # Ex: entity, ui-list, ui-detail, security
+
+    # ======================================================================
+    # GLOBAL SECURITY ROLE GENERATOR INTERACTION (Requires no Entity Name)
+    # ======================================================================
+    if action == "security":
+        gen_jmix_resource_roles_from_csv()
+        sys.exit(0)
+
+    # ======================================================================
+    # ENTITY SPECIFIC OPERATIONS (Requires exact Entity Name argument)
+    # ======================================================================
+    if len(sys.argv) == 2:
+        print("[-] Error: Missing required Entity Name parameter.")
         print("Usage: python3 jmix-cli.py [entity|ui-list|ui-detail] [Name]")
         sys.exit(1)
 
-    action = sys.argv[1]  # Ex: entity
-    name = sys.argv[2]  # Ex: Department
+    name = sys.argv[2]  # Ex: Department, UserStep, User
 
     if action == "entity":
-        # Fetch data from the normalized files in the CSV files
-        traits = get_traits_from_csv("traits.csv", name)
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
+        # Verify if the current entity is the Jmix system user
+        if name == "User":
+            print("👤 [System User] Triggering relational infiltration...")
+            relations_list = get_relations_from_csv("relations.csv", "User")
 
-        if not fields_list:
-            print(f" ⚠ No fields found for the entity '{name}' in entities.csv")
-            sys.exit(1)
+            if relations_list:
+                gen_liquibase_relations_changelog("User", relations_list)
+                inject_relations_into_existing_user(relations_list)
+                update_messages_entity(
+                    project_dir=".",
+                    base_package=COMPANY + "." + PROJECT,
+                    entity_name="User",
+                    traits_list=[],
+                )
+            else:
+                print(
+                    "   -> No relationships were configured for the User in relations.csv."
+                )
+        else:
+            # Fetch data from the normalized files in the CSV files
+            traits = get_traits_from_csv("traits.csv", name)
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
 
-        print(f"Generating Entity {name} from CSV architecture...")
-        gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
-        update_messages_entity(name, fields_list, traits, relations_list)
-        gen_liquibase_changelog_from_csv(name, fields_list, traits)
-        if relations_list:
-            gen_liquibase_relations_changelog(name, relations_list)
+            if not fields_list:
+                print(f" ⚠ No fields found for the entity '{name}' in entities.csv")
+                sys.exit(1)
+
+            print(f"Generating Entity {name} from CSV architecture...")
+            gen_entity_mechanic_from_csv(name, fields_list, traits, relations_list)
+
+            # PARAMETRIC EXTRACTION: We read only the fields of this entity from entities.csv
+            computed_traits_list = []
+            if os.path.exists("entities.csv"):
+                with open("entities.csv", mode="r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Strict condition: if the row belongs to the current entity (e.g., Step)
+                        if row["entity_name"].strip() == name.strip():
+                            computed_traits_list.append(row["field_name"].strip())
+
+            # If for some reason the list is empty, we put a safety fallback
+            if not computed_traits_list:
+                computed_traits_list = ["name"]
+
+            # NOW CALLING THE FUNCTION, PASSING THE ACTUAL LIST CALCULATED FROM CSV!
+            update_messages_entity(
+                project_dir=".",
+                base_package=COMPANY + "." + PROJECT,
+                entity_name=name,
+                traits_list=computed_traits_list,
+            )
+            gen_liquibase_changelog_from_csv(name, fields_list, traits)
+            if relations_list:
+                gen_liquibase_relations_changelog(name, relations_list)
 
     elif action == "ui-list":
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
-        if not fields_list:
-            print(f" ⚠ Error: Fields for entity '{name}' do not exist in entities.csv")
-            sys.exit(1)
-        gen_list_view_from_csv(name, fields_list, relations_list)
-        update_menu(name)
+        if name == "User":
+            print("[*] Triggering FlowUI List View infiltration for system User...")
+            relations_list = get_relations_from_csv("relations.csv", "User")
+            inject_list_ui_into_existing_user(relations_list)
+        else:
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
+            if not fields_list:
+                print(
+                    f" ⚠️ Error: Fields for entity '{name}' do not exist in entities.csv"
+                )
+                sys.exit(1)
+            gen_list_view_from_csv(name, fields_list, relations_list)
+            update_menu(name)
 
     elif action == "ui-detail":
-        fields_list = get_entities_from_csv("entities.csv", name)
-        relations_list = get_relations_from_csv("relations.csv", name)
-        if not fields_list:
-            print(f" ⚠ Error: Fields for '{name}' do not exist in entities.csv")
-            sys.exit(1)
-        gen_detail_view_from_csv(name, fields_list, relations_list)
+        if name == "User":
+            print("[*] Triggering FlowUI Detail View infiltration for system User...")
+            relations_list = get_relations_from_csv("relations.csv", "User")
+            inject_detail_ui_into_existing_user(relations_list)
+        else:
+            fields_list = get_entities_from_csv("entities.csv", name)
+            relations_list = get_relations_from_csv("relations.csv", name)
+            if not fields_list:
+                print(f" ⚠️ Error: Fields for '{name}' do not exist in entities.csv")
+                sys.exit(1)
+            gen_detail_view_from_csv(name, fields_list, relations_list)
 
     else:
-        print(f" ⚠ Unknown action: '{action}'. Use entity, ui-list or ui-detail.")
+        print(
+            f" ⚠️ Unknown action: '{action}'. Use entity, ui-list, ui-detail or security."
+        )
         sys.exit(1)
