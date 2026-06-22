@@ -1,4 +1,9 @@
 name,code,entity_name,ui_list,ui_detail,create,read,update,delete
-HR Manager,hr-manager,UserStep,true,true,true,true,true,true
+Employee Role,employee-role,UserStep,true,true,false,true,true,false
+Employee Role,employee-role,User,true,true,false,true,true,false
+Employee Role,employee-role,Step,true,true,false,true,false,false
+Employee Role,employee-role,Department,false,false,false,false,false,false
 HR Manager,hr-manager,Department,true,true,false,true,false,false
-Employee Role,employee-role,UserStep,true,false,false,true,false,false
+HR Manager,hr-manager,Step,true,true,false,true,false,false
+HR Manager,hr-manager,User,true,true,true,true,true,true
+HR Manager,hr-manager,UserStep,true,true,true,true,true,true
