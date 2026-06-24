@@ -1,7 +1,7 @@
 source_entity,relation_type,target_entity,field_name,mandatory
 Department,N:1,User,hrManager,false
 User,N:1,Department,department,false
-User,COMPOSITION_1:N,UserStep,steps,false
+UserStep,COMPOSITION_1:N,User,steps,false
 User,N:1,OnboardingStatus,onboardingStatus,false
 UserStep,N:1,User,user,true
 UserStep,N:1,Step,step,true
